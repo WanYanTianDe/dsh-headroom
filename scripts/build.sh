@@ -17,4 +17,12 @@ pnpm install
 pnpm typecheck
 pnpm test
 pnpm build
+
+# 泄漏护栏:构建产物不得含构建机绝对路径(盘符/家目录),防止个人目录进入仓库。
+# 模式排除协议冒号(http:// 的 p:/ 不是盘符)。
+echo "==> leak guard: scanning lib/ for absolute paths"
+if grep -RInE '[A-Za-z]:[\\/][A-Za-z]|/Users/|/home/' lib/; then
+  echo "error: lib/ contains absolute paths (see above); fix the bundler plugin before committing" >&2
+  exit 1
+fi
 echo "==> done: lib/index.js + lib/client.js"

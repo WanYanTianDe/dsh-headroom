@@ -7,7 +7,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { basename, dirname, resolve as resolvePath } from 'node:path'
+import { basename, dirname, relative, resolve as resolvePath, sep } from 'node:path'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
@@ -38,6 +38,26 @@ function resolveCssFile(source: string, importer: string | undefined): string {
     return resolvePath(dirname(importer), source)
   }
   return require.resolve(source)
+}
+
+/**
+ * Bundle-safe virtual id for one CSS file. The id must never embed the build
+ * machine's absolute path: rolldown writes virtual ids into `#region`
+ * comments of the emitted bundle, so an absolute id would leak the developer's
+ * home directory into the committed artifact. Relative ids stay reproducible
+ * across machines; a file outside the package root falls back to its bare
+ * basename (no directory information at all).
+ */
+function toCssVirtualId(abs: string): string {
+  const rel = relative(process.cwd(), abs)
+  const safe = rel.startsWith('..') ? basename(abs) : rel.split(sep).join('/')
+  return CSS_VIRTUAL_PREFIX + safe + CSS_VIRTUAL_SUFFIX
+}
+
+/** Resolve a {@link toCssVirtualId} id back to the absolute file path. */
+function fromCssVirtualId(id: string): string {
+  const part = id.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+  return resolvePath(process.cwd(), part.replaceAll('/', sep))
 }
 
 function styleTagModule(fileId: string, css: string, tagId: string): string {
@@ -95,12 +115,11 @@ export default [
       name: 'dsh-css-inline',
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.css')) return null
-        const abs = resolveCssFile(source, importer)
-        return CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+        return toCssVirtualId(resolveCssFile(source, importer))
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = fromCssVirtualId(virtualId)
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const tagId = `${PLUGIN_ID}/${basename(fileId)}`
