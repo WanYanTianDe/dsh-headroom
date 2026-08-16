@@ -30,7 +30,7 @@ const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'
 const require = createRequire(import.meta.url)
 
-const PLUGIN_ID = 'dsh-headroom'
+const PLUGIN_ID = '@dsh-external/dsh-headroom'
 
 function resolveCssFile(source: string, importer: string | undefined): string {
   if (source.startsWith('.')) {

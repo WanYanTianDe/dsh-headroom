@@ -4,6 +4,15 @@
 
 > 非官方社区插件,与 Headroom Labs / DeepSeek 无隶属关系。
 
+## 收录信息
+
+| 项 | 值 |
+|---|---|
+| npm 包名 | `@dsh-external/dsh-headroom` |
+| GitHub topic | `dsh-plugin` |
+| 分类(taxonomy v2) | 🤖 Agent 能力 |
+| 运行时依赖 | 已声明(peerDependencies);运行需要本地 headroom(Python)服务,插件自动引导安装 |
+
 ## 组件
 
 | 组件 | 说明 |
@@ -39,12 +48,12 @@ pnpm build
 #    在 ~/.dsh/profiles/<profile>/cordis.patch.yml 添加:
 #     - insert:
 #         - id: dsh-headroom
-#           name: 'dsh-headroom'
+#           name: '@dsh-external/dsh-headroom'
 ```
 
 **位置约束**:`package.json` 的 devDependencies 用相对路径 `link:../../source/current/...` 指向 DSH 检出,该路径从插件包目录解析,因此**插件必须位于 `~/.dsh/plugins/<name>`**。放到其他位置时,请把 package.json 里的 `../../source/current` 改为指向你 DSH 检出的相对或绝对路径。
 
-`profile package.json` 里需有 `"dsh-headroom": "link:<插件绝对路径>"` 依赖与 `node_modules` junction(用 `dev_install_package` 或手动 `pnpm add link:...` 建立),patch 的 `insert` 才能解析包名。
+`profile package.json` 里需有 `"@dsh-external/dsh-headroom": "link:<插件绝对路径>"` 依赖与 `node_modules` junction(用 `dev_install_package` 或手动 `pnpm add link:...` 建立),patch 的 `insert` 才能解析包名。
 
 ## 配置
 

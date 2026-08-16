@@ -1,5 +1,5 @@
 {
-  "name": "dsh-headroom",
+  "name": "@dsh-external/dsh-headroom",
   "version": "0.1.0",
   "private": true,
   "type": "module",
