@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
-const PACKAGE_NAME = '@dsh-external/dsh-headroom'
+const PACKAGE_NAME = '@wanyantiande/dsh-headroom'
 const ENTRY_ID = 'dsh-headroom'
 const PROFILE = process.argv[2] ?? 'web'
 const pluginDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')

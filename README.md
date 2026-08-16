@@ -23,7 +23,7 @@ node scripts/install.mjs
 > # 然后编辑 ~/.dsh/profiles/web/cordis.patch.yml,加:
 > #   - insert:
 > #       - id: dsh-headroom
-> #         name: '@dsh-external/dsh-headroom'
+> #         name: '@wanyantiande/dsh-headroom'
 > ```
 
 装好后,打开 **设置 → 插件**,能看到 **"Headroom 压缩"** 卡片,就成了。
@@ -78,7 +78,7 @@ pnpm build                 # 打包 → lib/index.js + lib/client.js
 
 | 项 | 值 |
 |---|---|
-| npm 包名 | `@dsh-external/dsh-headroom` |
+| npm 包名 | `@wanyantiande/dsh-headroom` |
 | GitHub topic | `dsh-plugin` |
 | 分类(taxonomy v2) | 🤖 Agent 能力 |
 | 测试 | vitest 19 例(format/service/controller) |
