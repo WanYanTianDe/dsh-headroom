@@ -46,6 +46,7 @@ node scripts/install.mjs
 
 - 插件会自动准备好本地压缩服务(第一次会自动下载,稍等一会儿)
 - 对话变长后,旧内容会被自动压缩,省 token
+- 大工具输出(默认超过 16384 字符)也会被自动压缩
 - 压缩不等于删除——原文都存着,模型需要细节时会自己取回
 
 ## 想改点什么?去设置里点
@@ -58,6 +59,8 @@ node scripts/install.mjs
 | 指定压缩服务的位置 | 填 "headroom 命令路径"(一般不用管,自动找) |
 | 换端口 | 改 "代理端口" |
 | 不让它自动装服务 | 关掉 "缺少 headroom 时自动安装" |
+| 关掉工具输出压缩 | 关掉 "压缩大工具输出"(默认开) |
+| 调工具输出压缩阈值 | 改 "工具输出压缩阈值(字符)"(默认 16384) |
 
 ## 常见问题
 
@@ -75,7 +78,7 @@ uv tool install "headroom-ai[all]"
 设置卡片填 Python 路径保存即可,马上换。
 
 **Q: 和 dsh-compressor 有什么区别?**
-它只压缩工具的输出,我们压缩整段对话历史。两个可以一起用,不冲突。
+它只压缩工具的输出,我们**历史压缩和工具输出压缩都做**(0.2.0 起内置工具输出压缩),压缩对象和取回方式更统一。装了本插件就不需要 dsh-compressor 了;两者并存也无冲突。
 
 **Q: 装了它,原来的 compaction-basic 会怎样?**
 会自动被本插件接管:启动时若发现压缩服务已被 compaction-basic 占用,插件会禁用 compaction-basic 的装配条目(写入你的 `cordis.patch.yml`,preset 文件不会被改写)并注册 headroom 压缩引擎;卸载插件时自动恢复原状态。如果不想让 headroom 接管压缩,请勿同时启用两者。
@@ -84,7 +87,7 @@ uv tool install "headroom-ai[all]"
 
 ```bash
 bash scripts/build.sh      # 构建:类型检查 + 测试 + 打包(需要 DSH 源码,见下)
-pnpm test                  # 测试(19 例,不需要 DSH 源码)
+pnpm test                  # 测试(37 例,不需要 DSH 源码)
 pnpm typecheck             # 类型检查
 pnpm build                 # 打包 → lib/index.js + lib/client.js
 ```
@@ -98,7 +101,7 @@ pnpm build                 # 打包 → lib/index.js + lib/client.js
 | npm 包名 | `@wanyantiande/dsh-headroom`(npm registry, public) |
 | GitHub topic | `dsh-plugin` |
 | 分类(taxonomy v2) | 🤖 Agent 能力 |
-| 测试 | vitest 19 例(format/service/controller) |
+| 测试 | vitest 37 例(format/service/takeover/result-compressor/controller) |
 | 许可 | MIT(插件);依赖的 Headroom 为 Apache-2.0,DSH 为 MIT |
 
 ## 许可

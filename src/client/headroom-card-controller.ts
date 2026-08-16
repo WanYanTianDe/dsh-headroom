@@ -19,6 +19,8 @@ export interface HeadroomSettings {
   port?: number
   baseUrl?: string
   autoInstall?: boolean
+  resultCompressionEnabled?: boolean
+  resultCompressionThresholdChars?: number
 }
 
 /** What the card renders. */
@@ -41,10 +43,13 @@ export interface HeadroomCardState {
   port: string
   baseUrl: string
   autoInstall: boolean
+  resultCompressionEnabled: boolean
+  thresholdChars: string
+  thresholdInvalid: boolean
 }
 
 /** Editable text fields of the card. */
-export type HeadroomTextField = 'command' | 'pythonPath' | 'uvCommand' | 'port' | 'baseUrl'
+export type HeadroomTextField = 'command' | 'pythonPath' | 'uvCommand' | 'port' | 'baseUrl' | 'thresholdChars'
 
 /** The registration-side face the card's slot entry injects. */
 export interface HeadroomCardFace {
@@ -56,6 +61,8 @@ export interface HeadroomCardFace {
   edit: (field: HeadroomTextField, text: string) => void
   /** Stage the auto-install switch's opposite state. */
   toggleAutoInstall: () => void
+  /** Stage the tool-result compression switch's opposite state. */
+  toggleResultCompression: () => void
   /** Write every staged edit, then re-seed from what the Host accepted. */
   save: () => void
   /** Drop every staged edit. */
@@ -66,7 +73,7 @@ function textValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function portText(value: unknown): string {
+function numberText(value: unknown): string {
   return typeof value === 'number' ? String(value) : ''
 }
 
@@ -94,15 +101,18 @@ export class HeadroomCardController {
       available: snapshot.status === 'ready',
       writable: snapshot.writable,
       dirty: this.staged.size > 0,
-      invalid: this.stagedPortInvalid(),
+      invalid: this.stagedPortInvalid() || this.stagedThresholdInvalid(),
       saving: this.saving,
       failed: this.failed,
       command: this.draft('command', textValue(value?.command)),
       pythonPath: this.draft('pythonPath', textValue(value?.pythonPath)),
       uvCommand: this.draft('uvCommand', textValue(value?.uvCommand)),
-      port: this.draft('port', portText(value?.port)),
+      port: this.draft('port', numberText(value?.port)),
       baseUrl: this.draft('baseUrl', textValue(value?.baseUrl)),
       autoInstall: value?.autoInstall ?? true,
+      resultCompressionEnabled: value?.resultCompressionEnabled ?? true,
+      thresholdChars: this.draft('thresholdChars', numberText(value?.resultCompressionThresholdChars)),
+      thresholdInvalid: this.stagedThresholdInvalid(),
     }
   }
 
@@ -119,6 +129,15 @@ export class HeadroomCardController {
     return !Number.isInteger(parsed) || parsed < 1 || parsed > 65535
   }
 
+  private stagedThresholdInvalid(): boolean {
+    const threshold = this.staged.get('thresholdChars')
+    if (threshold === undefined) return false
+    const trimmed = threshold.trim()
+    if (trimmed === '') return false
+    const parsed = Number(trimmed)
+    return !Number.isInteger(parsed) || parsed < 1
+  }
+
   private publish(): void {
     this.store.set(this.projection())
   }
@@ -133,9 +152,9 @@ export class HeadroomCardController {
     const writes: Array<Promise<unknown>> = []
     for (const [field, text] of this.staged) {
       const trimmed = text.trim()
-      if (field === 'port') {
-        if (trimmed === '') writes.push(this.scope.unset('port'))
-        else writes.push(this.scope.set('port', Number(trimmed)))
+      if (field === 'port' || field === 'thresholdChars') {
+        if (trimmed === '') writes.push(this.scope.unset(field))
+        else writes.push(this.scope.set(field, Number(trimmed)))
       } else if (trimmed === '') {
         writes.push(this.scope.unset(field))
       } else {
@@ -150,7 +169,7 @@ export class HeadroomCardController {
    * A failed save keeps its drafts so the user can correct them.
    */
   private async save(): Promise<void> {
-    if (this.staged.size === 0 || this.saving || this.stagedPortInvalid()) return
+    if (this.staged.size === 0 || this.saving || this.stagedPortInvalid() || this.stagedThresholdInvalid()) return
     this.saving = true
     this.failed = false
     this.publish()
@@ -173,6 +192,13 @@ export class HeadroomCardController {
       toggleAutoInstall: () => {
         this.failed = false
         void this.scope.set('autoInstall', !(this.scope.getSnapshot().value?.autoInstall ?? true))
+      },
+      toggleResultCompression: () => {
+        this.failed = false
+        void this.scope.set(
+          'resultCompressionEnabled',
+          !(this.scope.getSnapshot().value?.resultCompressionEnabled ?? true),
+        )
       },
       save: () => { void this.save() },
       discard: () => {

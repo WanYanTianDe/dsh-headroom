@@ -27,6 +27,8 @@ import { HeadroomCompactionEngine } from './engine.ts'
 import type { HeadroomEngineConfig } from './engine.ts'
 import { DEFAULT_HEADROOM_PORT, resolveServiceConfig, startHeadroomService } from './service.ts'
 import type { HeadroomServiceConfig } from './service.ts'
+import { installResultCompression, resolveResultCompression } from './result-compressor.ts'
+import type { ResultCompressionConfig } from './result-compressor.ts'
 
 export const name = 'dsh-headroom'
 /** Services the plugin and its compaction engine read through the context. */
@@ -49,6 +51,8 @@ export interface Config {
   maxOverflowRetries?: number
   /** Enable automatic step-boundary pressure and overflow-recovery listeners (default true). */
   auto?: boolean
+  /** Tool-result compression policy; the settings namespace overrides `enabled` and `thresholdChars`. */
+  resultCompression?: Partial<ResultCompressionConfig>
 }
 
 const serviceConfigSchema = z.object({
@@ -71,6 +75,12 @@ export const Config: z<Config> = z.object({
   compactionRetries: z.number().step(1).min(0),
   maxOverflowRetries: z.number().step(1).min(0),
   auto: z.boolean(),
+  resultCompression: z.object({
+    enabled: z.boolean(),
+    thresholdChars: z.number().step(1).min(1),
+    minSavingsRatio: z.number(),
+    maxPerStep: z.number().step(1).min(1),
+  }),
 })
 
 /** Settings namespace shared with the browser card. */
@@ -93,6 +103,10 @@ export interface HeadroomSettings {
   baseUrl?: string
   /** Auto-install headroom-ai via uv when the command is missing. */
   autoInstall?: boolean
+  /** Tool-result compression switch; absent falls back to the composition layer. */
+  resultCompressionEnabled?: boolean
+  /** Tool-result compression threshold in characters; absent falls back to the composition layer. */
+  resultCompressionThresholdChars?: number
 }
 
 const headroomSettingsSchema = z.object({
@@ -102,6 +116,8 @@ const headroomSettingsSchema = z.object({
   port: z.number().step(1).min(1).max(65535),
   baseUrl: z.string(),
   autoInstall: z.boolean(),
+  resultCompressionEnabled: z.boolean(),
+  resultCompressionThresholdChars: z.number().step(1).min(1),
 })
 
 /** Every key BasicCompactionEngine's config validation accepts. */
@@ -128,8 +144,7 @@ function engineConfig(config: Config): HeadroomEngineConfig {
   return engine
 }
 
-export function apply(ctx: Context, config: Config): void {
-  ctx.provide('headroomClient', undefined)
+export function apply(ctx: Context, config: Config): void {  ctx.provide('headroomClient', undefined)
   const scope = ctx.settings.register(HEADROOM_SETTINGS_NS, headroomSettingsSchema, {
     base: {
       command: config.headroom?.command ?? '',
@@ -143,6 +158,10 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   installProxyLifecycle(ctx, scope)
+
+  // Tool-result compression runs before the historical compaction pass, so
+  // the surface the compaction prices is already slimmed.
+  installResultCompression(ctx, () => liveResultConfig(scope, config))
 
   installEngine(ctx, config)
 
@@ -169,6 +188,21 @@ export function apply(ctx: Context, config: Config): void {
       return (await client.retrieve(args.hash)) as JsonValue
     },
   })), 'dsh-headroom: tool')
+}
+
+/**
+ * Result-compression policy resolved at a step boundary: settings values
+ * override the composition layer, which itself defaults over the baked-in
+ * policy defaults.
+ */
+function liveResultConfig(scope: SettingsScope<HeadroomSettings>, config: Config): ResultCompressionConfig {
+  const base = resolveResultCompression(config.resultCompression)
+  const settings = scope.get()
+  return {
+    ...base,
+    enabled: settings.resultCompressionEnabled ?? base.enabled,
+    thresholdChars: settings.resultCompressionThresholdChars ?? base.thresholdChars,
+  }
 }
 
 /**

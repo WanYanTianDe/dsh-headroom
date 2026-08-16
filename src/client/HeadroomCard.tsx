@@ -5,7 +5,8 @@
 
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from './slots.ts'
-import type { HeadroomCardFace, HeadroomTextField } from './headroom-card-controller.ts'
+import type { HeadroomCardFace, HeadroomCardState, HeadroomTextField } from './headroom-card-controller.ts'
+import type { HeadroomKey } from './locales.ts'
 import css from './HeadroomCard.module.css'
 
 /** Props the renderer binds for the Headroom settings card. */
@@ -16,8 +17,8 @@ export type HeadroomCardProps =
 
 const TEXT_FIELDS: Array<{
   field: HeadroomTextField
-  label: 'commandLabel' | 'pythonPathLabel' | 'uvCommandLabel' | 'portLabel' | 'baseUrlLabel'
-  placeholder: 'commandPlaceholder' | 'pythonPathPlaceholder' | 'uvCommandPlaceholder' | 'portPlaceholder' | 'baseUrlPlaceholder'
+  label: 'commandLabel' | 'pythonPathLabel' | 'uvCommandLabel' | 'portLabel' | 'baseUrlLabel' | 'thresholdLabel'
+  placeholder: 'commandPlaceholder' | 'pythonPathPlaceholder' | 'uvCommandPlaceholder' | 'portPlaceholder' | 'baseUrlPlaceholder' | 'thresholdPlaceholder'
   numeric: boolean
 }> = [
   { field: 'command', label: 'commandLabel', placeholder: 'commandPlaceholder', numeric: false },
@@ -25,7 +26,15 @@ const TEXT_FIELDS: Array<{
   { field: 'uvCommand', label: 'uvCommandLabel', placeholder: 'uvCommandPlaceholder', numeric: false },
   { field: 'port', label: 'portLabel', placeholder: 'portPlaceholder', numeric: true },
   { field: 'baseUrl', label: 'baseUrlLabel', placeholder: 'baseUrlPlaceholder', numeric: false },
+  { field: 'thresholdChars', label: 'thresholdLabel', placeholder: 'thresholdPlaceholder', numeric: true },
 ]
+
+/** Invalid-state copy per numeric field; the port's message also covers other invalid drafts. */
+function invalidText(field: HeadroomTextField, state: HeadroomCardState, t: (key: HeadroomKey) => string): string | null {
+  if (field === 'port' && state.invalid) return t('invalidPort')
+  if (field === 'thresholdChars' && state.thresholdInvalid) return t('invalidThreshold')
+  return null
+}
 
 /**
  * Render the Headroom settings card.
@@ -44,6 +53,7 @@ export function HeadroomCard(props: HeadroomCardProps) {
       case 'uvCommand': return state.uvCommand
       case 'port': return state.port
       case 'baseUrl': return state.baseUrl
+      case 'thresholdChars': return state.thresholdChars
     }
   }
 
@@ -54,23 +64,26 @@ export function HeadroomCard(props: HeadroomCardProps) {
         <span className={css.description}>{t('cardDescription')}</span>
       </div>
 
-      {TEXT_FIELDS.map(({ field, label, placeholder, numeric }) => (
-        <div className={css.field} key={field}>
-          <label className={css.label} htmlFor={`dsh-headroom-${field}`}>{t(label)}</label>
-          <input
-            id={`dsh-headroom-${field}`}
-            className={css.input + (numeric && state.invalid ? ` ${css.invalid}` : '')}
-            type="text"
-            value={fieldValue(field)}
-            placeholder={t(placeholder)}
-            disabled={!state.writable}
-            onChange={(event) => props.edit(field, event.target.value)}
-          />
-          {numeric && state.invalid && (
-            <span className={css.placeholder}>{t('invalidPort')}</span>
-          )}
-        </div>
-      ))}
+      {TEXT_FIELDS.map(({ field, label, placeholder }) => {
+        const invalid = invalidText(field, state, t)
+        return (
+          <div className={css.field} key={field}>
+            <label className={css.label} htmlFor={`dsh-headroom-${field}`}>{t(label)}</label>
+            <input
+              id={`dsh-headroom-${field}`}
+              className={css.input + (invalid !== null ? ` ${css.invalid}` : '')}
+              type="text"
+              value={fieldValue(field)}
+              placeholder={t(placeholder)}
+              disabled={!state.writable}
+              onChange={(event) => props.edit(field, event.target.value)}
+            />
+            {invalid !== null && (
+              <span className={css.placeholder}>{invalid}</span>
+            )}
+          </div>
+        )
+      })}
 
       <label className={css.toggle}>
         <input
@@ -80,6 +93,16 @@ export function HeadroomCard(props: HeadroomCardProps) {
           onChange={props.toggleAutoInstall}
         />
         <span>{t('autoInstallLabel')}</span>
+      </label>
+
+      <label className={css.toggle}>
+        <input
+          type="checkbox"
+          checked={state.resultCompressionEnabled}
+          disabled={!state.writable}
+          onChange={props.toggleResultCompression}
+        />
+        <span>{t('resultCompressionLabel')}</span>
       </label>
 
       <div className={css.actions}>
