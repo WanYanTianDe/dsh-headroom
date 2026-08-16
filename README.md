@@ -77,6 +77,9 @@ uv tool install "headroom-ai[all]"
 **Q: 和 dsh-compressor 有什么区别?**
 它只压缩工具的输出,我们压缩整段对话历史。两个可以一起用,不冲突。
 
+**Q: 装了它,原来的 compaction-basic 会怎样?**
+会自动被本插件接管:启动时若发现压缩服务已被 compaction-basic 占用,插件会禁用 compaction-basic 的装配条目(写入你的 `cordis.patch.yml`,preset 文件不会被改写)并注册 headroom 压缩引擎;卸载插件时自动恢复原状态。如果不想让 headroom 接管压缩,请勿同时启用两者。
+
 ## 给开发者
 
 ```bash
