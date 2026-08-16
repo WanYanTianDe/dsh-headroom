@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "@wanyantiande/dsh-headroom",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "license": "MIT",
   "type": "module",
   "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, the headroom_retrieve CCR tool, and a settings card.",
@@ -32,6 +32,7 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-commands": "*",
     "@deepseek-ai/dsh-compaction": "*",
     "@deepseek-ai/dsh-compaction-basic": "*",
     "@deepseek-ai/dsh-llm": "*",
@@ -66,3 +67,4 @@
     "vitest": "^4.1.10"
   }
 }
+

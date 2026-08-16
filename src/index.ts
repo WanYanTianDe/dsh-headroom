@@ -29,10 +29,11 @@ import { DEFAULT_HEADROOM_PORT, resolveServiceConfig, startHeadroomService } fro
 import type { HeadroomServiceConfig } from './service.ts'
 import { installResultCompression, resolveResultCompression } from './result-compressor.ts'
 import type { ResultCompressionConfig } from './result-compressor.ts'
+import { installHeadroomCommand } from './command.ts'
 
 export const name = 'dsh-headroom'
 /** Services the plugin and its compaction engine read through the context. */
-export const inject: string[] = ['settings', 'tools', 'llm', 'tokenMeter', 'sessions']
+export const inject: string[] = ['settings', 'tools', 'llm', 'tokenMeter', 'sessions', 'commands']
 
 export interface Config {
   /** Headroom proxy wiring; the `headroom` settings namespace overrides these. */
@@ -166,6 +167,8 @@ export function apply(ctx: Context, config: Config): void {  ctx.provide('headro
   installEngine(ctx, config)
 
   installTakeoverRollback(ctx)
+
+  installHeadroomCommand(ctx, scope, HEADROOM_SETTINGS_NS)
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'headroom_retrieve',

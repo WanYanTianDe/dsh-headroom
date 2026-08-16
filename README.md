@@ -46,7 +46,7 @@ node scripts/install.mjs
 
 - 插件会自动准备好本地压缩服务(第一次会自动下载,稍等一会儿)
 - 对话变长后,旧内容会被自动压缩,省 token
-- 大工具输出(默认超过 16384 字符)也会被自动压缩
+- 大工具输出(默认超过 8192 字符)也会被自动压缩
 - 压缩不等于删除——原文都存着,模型需要细节时会自己取回
 
 ## 功能
@@ -57,25 +57,40 @@ node scripts/install.mjs
 | 历史压缩 | 对话 token 压力/溢出时,把选中的历史区间发给本地代理 `POST /v1/compress`,压缩结果文本化为 checkpoint 写入会话。继承 harness 压缩后端全部机制(region 事务/压力触发/溢出恢复/持久化)。 |
 | 工具输出压缩 | 每次模型请求前(step 边界),把超过阈值的大工具输出经代理压缩并影子替换为压缩文本;原文留在会话日志(可重建),模型可经 `headroom_retrieve` 取回完整内容。无收益(<20% token 节省)或代理不可用时保留原文。 |
 | 取回工具 | `headroom_retrieve(hash)` → `POST /v1/retrieve`,模型按压缩文本/checkpoint 中的 ccr hash 取回被压缩的原文(历史与工具输出通用)。 |
-| 设置卡片 | 浏览器 **设置 → 插件 → Headroom 压缩**,编辑代理路径/端口与压缩策略;保存后即时生效。 |
+| 配置命令 | `/headroom` 对话命令:查看/修改代理与压缩设置(写同一 settings 命名空间,不依赖设置面板);设置卡片因 harness 白名单限制可能不可见(见"配置"章节)。 |
 
 ## 配置
 
-### 设置面板(推荐)
+### 方式一:对话命令 `/headroom`(所有环境可用)
 
-| 想做的事 | 怎么弄 |
-|---|---|
-| 换一个 Python 来跑服务 | 填 "Python 解释器路径",保存,立刻生效 |
-| 指定压缩服务的位置 | 填 "headroom 命令路径"(一般不用管,自动找) |
-| 换端口 | 改 "代理端口" |
-| 不让它自动装服务 | 关掉 "缺少 headroom 时自动安装" |
-| 关掉工具输出压缩 | 关掉 "压缩大工具输出"(默认开) |
-| 调工具输出压缩阈值 | 改 "工具输出压缩阈值(字符)"(默认 8192) |
+在任意会话输入(agent 也会执行):
 
-### cordis config(设置面板未覆盖的高级项)
+```
+/headroom                          # 查看当前生效配置
+/headroom set port 9000            # 修改配置(数字/布尔/字符串按类型解析)
+/headroom unset port               # 恢复组合层默认
+```
+
+可设置键:`port`、`baseUrl`、`command`、`pythonPath`、`uvCommand`、`autoInstall`、`resultCompressionEnabled`、`resultCompressionThresholdChars`。
+
+### 方式二:设置卡片(需要 harness 白名单支持)
+
+**设置 → 插件 → 插件配置** 里的 "Headroom 压缩" 卡片依赖 harness 的配置客户端暴露白名单(`api-proxy.ts` 的 `WEB_SETTINGS_NAMESPACES`,官方注释承认是待办)。**外部插件默认不在白名单中**,卡片会不可见——这是 harness 的限制,不是插件缺陷。两种解决:
+- 在 harness 的 `WEB_SETTINGS_NAMESPACES` 加 `'headroom'`(一行)后重启;
+- 或直接用 `/headroom` 命令(方式一,无此限制)。
+
+### 方式三:settings.yaml / cordis config
 
 ```yaml
-# 插件 entry 的 config 下:
+# ~/.dsh/settings.yaml 的 headroom 段
+headroom:
+  port: 8787
+  command: ''        # 留空自动发现
+  autoInstall: true
+```
+
+```yaml
+# 插件 entry 的 config 下(设置面板未覆盖的高级项):
 config:
   resultCompression:
     minSavingsRatio: 0.15   # 工具输出压缩的最小收益比例(默认 0.15)
