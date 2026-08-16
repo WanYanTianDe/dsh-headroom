@@ -47,9 +47,17 @@ const patch = existsSync(patchFile) ? readFileSync(patchFile, 'utf8') : ''
 if (patch.includes(`id: ${ENTRY_ID}`)) {
   console.log(`2/2 ${ENTRY_ID} 已在 ${patchFile} 中,跳过`)
 } else {
-  const insert = patch.trimEnd().endsWith(']')
-    ? patch.trimEnd().slice(0, -1).trimEnd() + `\n    - id: ${ENTRY_ID}\n      name: '${PACKAGE_NAME}'\n]\n`
-    : `${patch.trimEnd()}\n\n- insert:\n    - id: ${ENTRY_ID}\n      name: '${PACKAGE_NAME}'\n`
+  const trimmed = patch.trimEnd()
+  let insert
+  if (trimmed === '' || /^\[\s*\]$/.test(trimmed)) {
+    // Empty file or an empty flow array: write a standard block list.
+    insert = `- insert:\n    - id: ${ENTRY_ID}\n      name: '${PACKAGE_NAME}'\n`
+  } else if (trimmed.startsWith('[')) {
+    fail('现有 cordis.patch.yml 是流式数组格式,无法安全追加;请手动加入 insert 条目后重试')
+  } else {
+    // Block-style array: append a new block.
+    insert = `${trimmed}\n\n- insert:\n    - id: ${ENTRY_ID}\n      name: '${PACKAGE_NAME}'\n`
+  }
   writeFileSync(patchFile, insert)
   console.log(`2/2 已写入 ${patchFile}`)
 }
