@@ -1,6 +1,6 @@
 # dsh-headroom
 
-给 DeepSeek Harness 装的"省钱引擎":对话太长时,自动把旧内容压紧,少烧 token;需要细节时,还能自动找回原文。
+给 DeepSeek Harness 装的"省钱引擎":对话太长时自动把旧内容压紧、大工具输出自动瘦身,少烧 token;需要细节时,模型还能自动找回原文。
 
 > 非官方社区插件,与 Headroom Labs / DeepSeek 无隶属关系。
 
@@ -49,9 +49,19 @@ node scripts/install.mjs
 - 大工具输出(默认超过 16384 字符)也会被自动压缩
 - 压缩不等于删除——原文都存着,模型需要细节时会自己取回
 
-## 想改点什么?去设置里点
+## 功能
 
-**设置 → 插件 → Headroom 压缩**:
+| 组件 | 说明 |
+|---|---|
+| 代理生命周期 | 启动时探测 `127.0.0.1:8787`;无服务则自动发现 `headroom` 命令,缺失时经 `uv tool install headroom-ai[all]` 引导安装;然后 spawn `headroom proxy`,等待健康后挂载 `ctx.headroomClient`。设置变更时串行重启(复用不杀旧代理;启动配置变更强制换代理)。插件卸载时清理进程树。 |
+| 历史压缩 | 对话 token 压力/溢出时,把选中的历史区间发给本地代理 `POST /v1/compress`,压缩结果文本化为 checkpoint 写入会话。继承 harness 压缩后端全部机制(region 事务/压力触发/溢出恢复/持久化)。 |
+| 工具输出压缩 | 每次模型请求前(step 边界),把超过阈值的大工具输出经代理压缩并影子替换为压缩文本;原文留在会话日志(可重建),模型可经 `headroom_retrieve` 取回完整内容。无收益(<20% token 节省)或代理不可用时保留原文。 |
+| 取回工具 | `headroom_retrieve(hash)` → `POST /v1/retrieve`,模型按压缩文本/checkpoint 中的 ccr hash 取回被压缩的原文(历史与工具输出通用)。 |
+| 设置卡片 | 浏览器 **设置 → 插件 → Headroom 压缩**,编辑代理路径/端口与压缩策略;保存后即时生效。 |
+
+## 配置
+
+### 设置面板(推荐)
 
 | 想做的事 | 怎么弄 |
 |---|---|
@@ -61,6 +71,28 @@ node scripts/install.mjs
 | 不让它自动装服务 | 关掉 "缺少 headroom 时自动安装" |
 | 关掉工具输出压缩 | 关掉 "压缩大工具输出"(默认开) |
 | 调工具输出压缩阈值 | 改 "工具输出压缩阈值(字符)"(默认 16384) |
+
+### cordis config(设置面板未覆盖的高级项)
+
+```yaml
+# 插件 entry 的 config 下:
+config:
+  resultCompression:
+    minSavingsRatio: 0.2    # 工具输出压缩的最小收益比例(默认 0.2)
+    maxPerStep: 3           # 单次 step 最多压缩条数(默认 3)
+  thresholdRatio: 0.8       # 历史压缩压力阈值(默认 0.8,继承 BasicCompactionConfig)
+  retainRatio: 0.16         # 历史保留比例(默认 0.16)
+  auto: true                # 自动压缩开关(默认 true)
+```
+
+## 行为与限制
+
+- 压缩发生在 step 边界;替换遵循 harness 影子节点协议,消息保持可重建(会话日志是唯一事实源)。
+- checkpoint 必须比原文小,否则事务失败并保留原文(继承的安全语义)。
+- 无 headroom 服务时插件保持加载、压缩自动禁用,DSH 其余功能不受影响。
+- 后端为本地 Python 服务(uv 工具),首次自动安装约数百 MB;压缩幅度由 headroom 策略决定(JSON 密集内容收益最高;默认策略保守以保 KV 缓存)。
+- 工具输出压缩阈值默认 16384 字符;低于阈值的输出不压缩,压缩收益不足 20% 不替换。
+- 与 harness 的 `compaction-basic` 冲突时自动接管(见 FAQ)。
 
 ## 常见问题
 
@@ -78,7 +110,7 @@ uv tool install "headroom-ai[all]"
 设置卡片填 Python 路径保存即可,马上换。
 
 **Q: 和 dsh-compressor 有什么区别?**
-它只压缩工具的输出,我们**历史压缩和工具输出压缩都做**(0.2.0 起内置工具输出压缩),压缩对象和取回方式更统一。装了本插件就不需要 dsh-compressor 了;两者并存也无冲突。
+它只压缩工具的输出,我们**历史压缩和工具输出压缩都做**(0.2.0 起内置工具输出压缩),取回统一走 `headroom_retrieve`。装了本插件就不需要 dsh-compressor 了;两者并存也无冲突。
 
 **Q: 装了它,原来的 compaction-basic 会怎样?**
 会自动被本插件接管:启动时若发现压缩服务已被 compaction-basic 占用,插件会禁用 compaction-basic 的装配条目(写入你的 `cordis.patch.yml`,preset 文件不会被改写)并注册 headroom 压缩引擎;卸载插件时自动恢复原状态。如果不想让 headroom 接管压缩,请勿同时启用两者。
