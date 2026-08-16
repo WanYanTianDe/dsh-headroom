@@ -75,10 +75,16 @@ export class HeadroomCardController {
   private saving = false
   private failed = false
   private readonly store: SnapshotStore<HeadroomCardState>
+  private readonly stopWatch: () => void
 
   constructor(private readonly scope: SettingsScope<HeadroomSettings>) {
     this.store = createSnapshotStore(this.projection())
-    scope.subscribe(() => { this.publish() })
+    this.stopWatch = scope.subscribe(() => { this.publish() })
+  }
+
+  /** Unsubscribe from the settings scope; call when the owning fiber unloads. */
+  dispose(): void {
+    this.stopWatch()
   }
 
   private projection(): HeadroomCardState {

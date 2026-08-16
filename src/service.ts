@@ -51,7 +51,12 @@ export function resolveServiceConfig(config: Partial<HeadroomServiceConfig> | un
 }
 
 export interface HeadroomService {
-  client: HeadroomClient
+  /**
+   * Ready proxy client, or `undefined` when the service degraded (no command
+   * found or the spawned proxy never became healthy). Callers publish the
+   * undefined state so consumers see "not ready" instead of a broken client.
+   */
+  client: HeadroomClient | undefined
   dispose: () => void
   /** True when an already-healthy proxy was reused; the caller keeps its previous dispose ownership. */
   reused: boolean
@@ -106,7 +111,7 @@ function probeModule(py: string, args: string[]): boolean {
   try {
     const probe = spawnSync(py, args, {
       stdio: 'ignore',
-      timeout: 8_000,
+      timeout: 5_000,
       shell: false,
     })
     return probe.error === undefined && probe.status === 0
@@ -151,14 +156,14 @@ export async function startHeadroomService(
           'dsh-headroom: headroom not found and uv is not installed; '
           + 'install it with `uv tool install "headroom-ai[all]"` (install uv first if needed)',
         )
-        return { client, dispose: () => {}, reused: false }
+        return { client: undefined, dispose: () => {}, reused: false }
       }
       ctx.logger.info('dsh-headroom: installing headroom-ai via uv (first run)…')
       try {
         await runAndWait(uv, ['tool', 'install', '--python', '3.13', 'headroom-ai[all]'], config.installTimeoutMs)
       } catch (error) {
         ctx.logger.warn('dsh-headroom: auto-install failed: %s', errorMessage(error))
-        return { client, dispose: () => {}, reused: false }
+        return { client: undefined, dispose: () => {}, reused: false }
       }
       launch = await resolveLaunch(ctx, config)
     }
@@ -167,7 +172,7 @@ export async function startHeadroomService(
     ctx.logger.warn('dsh-headroom: headroom command not found; compression disabled. '
       + 'Install it with `uv tool install "headroom-ai[all]"`, set config.headroom.command, '
       + 'or set config.headroom.pythonPath to a Python that has headroom-ai installed.')
-    return { client, dispose: () => {}, reused: false }
+    return { client: undefined, dispose: () => {}, reused: false }
   }
 
   const child = spawn(launch.command, [...launch.prefix, 'proxy', '--port', String(config.port)], {
@@ -187,7 +192,7 @@ export async function startHeadroomService(
   }
   ctx.logger.warn('dsh-headroom: proxy did not become healthy within %sms; compression disabled', config.startTimeoutMs)
   killProcessTree(child)
-  return { client, dispose: () => {}, reused: false }
+  return { client: undefined, dispose: () => {}, reused: false }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -198,17 +203,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Resolve one explicit executable candidate. */
+/** Resolve one explicit executable candidate; a leading `~` expands to the home directory. */
 function findExecutable(candidate: string | undefined): string | undefined {
   if (candidate === undefined || candidate.length === 0) return undefined
-  if (existsSync(candidate)) return candidate
-  if (process.platform === 'win32' && existsSync(`${candidate}.exe`)) return `${candidate}.exe`
+  const expanded = candidate === '~' || candidate.startsWith('~/') || candidate.startsWith('~\\')
+    ? join(homedir(), candidate.slice(1))
+    : candidate
+  if (existsSync(expanded)) return expanded
+  if (process.platform === 'win32' && existsSync(`${expanded}.exe`)) return `${expanded}.exe`
   return undefined
 }
 
 /** Resolve a bare command name through the process PATH. */
 function findOnPath(name: string): string | undefined {
-  const probe = spawnSync(name, ['--version'], { stdio: 'ignore', timeout: 5_000, shell: false })
+  const probe = spawnSync(name, ['--version'], { stdio: 'ignore', timeout: 3_000, shell: false })
   return probe.error === undefined && probe.status !== null ? name : undefined
 }
 

@@ -26,6 +26,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-headroom: dictionaries')
 
   const controller = new HeadroomCardController(ctx.settingsScope.bind({ namespace: 'headroom' }))
+  ctx.effect(() => () => controller.dispose(), 'dsh-headroom: card controller lifetime')
 
   ctx.slots.inject('settings.plugin.item', function* () {
     yield ctx.slots.register(

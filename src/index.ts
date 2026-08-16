@@ -146,6 +146,8 @@ export function apply(ctx: Context, config: Config): void {
 
   installEngine(ctx, config)
 
+  installTakeoverRollback(ctx)
+
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'headroom_retrieve',
     description: 'Restore original content that the Headroom compression proxy replaced with a compacted checkpoint. Pass the exact ccr hash listed in a <compacted-summary> block of the conversation; returns the original tool output or message text.',
@@ -247,7 +249,9 @@ function installProxyLifecycle(
  * Register the headroom compaction engine as `ctx.compaction`. The Service
  * constructor provides the name immediately, so a duplicate-registration
  * conflict with the default compaction-basic backend surfaces synchronously;
- * in that case disable its loader entry first, then retry.
+ * in that case the loader entry of compaction-basic is disabled at runtime
+ * and the headroom engine takes over. The takeover is rolled back when this
+ * plugin unloads (see {@link installTakeoverRollback}).
  */
 function installEngine(ctx: Context, config: Config): void {
   try {
@@ -261,6 +265,9 @@ function installEngine(ctx: Context, config: Config): void {
     void takeOverCompaction(ctx, config)
   }
 }
+
+/** Whether this plugin disabled the compaction-basic loader entry at runtime. */
+let compactionTakenOver = false
 
 async function takeOverCompaction(ctx: Context, config: Config): Promise<void> {
   const loader = (ctx as unknown as {
@@ -276,10 +283,46 @@ async function takeOverCompaction(ctx: Context, config: Config): Promise<void> {
   try {
     await loader.update('compaction-basic', { disabled: true })
     new HeadroomCompactionEngine(ctx, engineConfig(config))
+    compactionTakenOver = true
     ctx.logger.info('dsh-headroom: disabled compaction-basic and registered the headroom engine')
   } catch (error) {
     ctx.logger.warn('dsh-headroom: could not take over the compaction service: %s', message(error))
   }
+}
+
+/**
+ * Restore the disabled compaction-basic entry when this plugin unloads, so
+ * the harness keeps a working compaction service after dsh-headroom is
+ * removed. The restore retries until the headroom engine's `compaction`
+ * service has been released by this fiber's disposal (disposers run in
+ * parallel, so the service may still be registered for a moment).
+ */
+function installTakeoverRollback(ctx: Context): void {
+  ctx.effect(() => {
+    let attempted = false
+    return async () => {
+      if (!compactionTakenOver || attempted) return
+      attempted = true
+      const loader = (ctx as unknown as {
+        loader?: { update(id: string, options: { disabled: boolean }): Promise<unknown> }
+      }).loader
+      if (loader === undefined) return
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        try {
+          await loader.update('compaction-basic', { disabled: false })
+          ctx.logger.info('dsh-headroom: re-enabled compaction-basic on unload')
+          return
+        } catch {
+          // compaction service still held by this fiber's disposal; retry
+        }
+      }
+      ctx.logger.warn(
+        'dsh-headroom: could not re-enable compaction-basic on unload; '
+        + 'remove its `disabled: true` marker in the loader tree or restart dsh web',
+      )
+    }
+  }, 'dsh-headroom: compaction takeover rollback')
 }
 
 function serviceConflict(error: unknown): boolean {

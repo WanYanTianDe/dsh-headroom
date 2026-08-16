@@ -1,6 +1,7 @@
 {
   "name": "@dsh-external/dsh-headroom",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, and the headroom_retrieve CCR tool.",
@@ -26,6 +27,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "build": "tsc -p tsconfig.json --noEmit && tsdown"
   },
   "peerDependencies": {
@@ -57,9 +59,11 @@
     "@deepseek-ai/schemastery": "link:../../source/current/vendor/schemastery",
     "@types/node": "link:../../source/current/node_modules/@types/node",
     "@types/react": "~18.3.1",
+    "jsdom": "^30.0.1",
     "lightningcss": "^1.32.0",
     "react": "^18.2.0",
     "tsdown": "^0.10.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.10"
   }
 }

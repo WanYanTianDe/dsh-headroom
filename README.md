@@ -19,6 +19,8 @@
 |---|---|
 | 代理生命周期 | 启动时探测 `127.0.0.1:8787`;无服务则自动发现 `headroom` 命令,缺失时经 `uv tool install headroom-ai[all]` 引导安装;然后 spawn `headroom proxy`,等待健康后挂载 `ctx.headroomClient`。设置变更时串行重启(复用不杀旧代理;启动配置变更强制换代理)。插件卸载时清理进程树。 |
 | 压缩后端 | `HeadroomCompactionEngine extends BasicCompactionEngine`,只覆写 `summarize()`:把选中的历史区间发给本地代理 `POST /v1/compress`,压缩后的消息序列文本化为 checkpoint 写入会话(继承全部 region 事务/压力触发/溢出恢复/持久化机制)。 |
+
+> **compaction 服务接管**:若默认的 `compaction-basic` 后端已装配,本插件启动时会运行时禁用其 loader 条目(不修改 `cordis.patch.yml`)并注册自己的引擎;卸载本插件时自动恢复 `compaction-basic`。若自动接管失败,请手动在 `cordis.patch.yml` 给 `compaction-basic` 加 `disabled: true` 后重启。
 | 取回工具 | `headroom_retrieve(hash)` → `POST /v1/retrieve`,模型可按 checkpoint 中的 ccr hash 取回被压缩的原文。 |
 | 设置卡片 | 浏览器 设置 → 插件配置页出现 "Headroom 压缩" 卡片,可编辑 headroom/uv/python 路径、端口、代理地址、自动安装开关;保存后即时生效(代理重启)。 |
 
@@ -98,10 +100,14 @@ headroom:
 ## 开发
 
 ```sh
-pnpm install        # devDependencies 以 link:../../source/current 指向 DSH 检出(插件须位于 ~/.dsh/plugins/<name>)
-pnpm build          # 先 tsc 类型检查,再 tsdown 打包 → lib/index.js + lib/client.js
-pnpm typecheck      # 单独跑类型检查
+bash scripts/build.sh   # 标准构建入口:install → typecheck → test → build(支持 DSH_CHECKOUT 环境变量)
+pnpm install            # devDependencies 以 link:../../source/current 指向 DSH 检出(插件须位于 ~/.dsh/plugins/<name>)
+pnpm typecheck          # 类型检查
+pnpm test               # vitest 套件(format/service/controller,共 19 例;不依赖 harness 运行时)
+pnpm build              # 先 tsc 类型检查,再 tsdown 打包 → lib/index.js + lib/client.js
 ```
+
+CI(`.github/workflows/ci.yml`)运行 install + test + 构建产物存在性检查;typecheck/build 需要 DSH 检出,在本地或设置 `DSH_CHECKOUT` 后运行 `scripts/build.sh`。
 
 ## 许可
 
