@@ -118,10 +118,10 @@ describe('resolveResultCompression', () => {
     expect(resolved).toEqual({
       enabled: true,
       thresholdChars: 42,
-      minSavingsRatio: 0.2,
+      minSavingsRatio: 0.15,
       maxPerStep: 3,
     })
-    expect(resolveResultCompression(undefined).thresholdChars).toBe(16_384)
+    expect(resolveResultCompression(undefined).thresholdChars).toBe(8_192)
   })
 })
 

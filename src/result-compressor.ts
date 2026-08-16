@@ -38,8 +38,8 @@ export interface ResultCompressionConfig {
 /** Default tool-result compression policy. */
 export const RESULT_COMPRESSION_DEFAULTS: ResultCompressionConfig = {
   enabled: true,
-  thresholdChars: 16_384,
-  minSavingsRatio: 0.2,
+  thresholdChars: 8_192,
+  minSavingsRatio: 0.15,
   maxPerStep: 3,
 }
 

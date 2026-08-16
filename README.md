@@ -70,7 +70,7 @@ node scripts/install.mjs
 | 换端口 | 改 "代理端口" |
 | 不让它自动装服务 | 关掉 "缺少 headroom 时自动安装" |
 | 关掉工具输出压缩 | 关掉 "压缩大工具输出"(默认开) |
-| 调工具输出压缩阈值 | 改 "工具输出压缩阈值(字符)"(默认 16384) |
+| 调工具输出压缩阈值 | 改 "工具输出压缩阈值(字符)"(默认 8192) |
 
 ### cordis config(设置面板未覆盖的高级项)
 
@@ -78,7 +78,7 @@ node scripts/install.mjs
 # 插件 entry 的 config 下:
 config:
   resultCompression:
-    minSavingsRatio: 0.2    # 工具输出压缩的最小收益比例(默认 0.2)
+    minSavingsRatio: 0.15   # 工具输出压缩的最小收益比例(默认 0.15)
     maxPerStep: 3           # 单次 step 最多压缩条数(默认 3)
   thresholdRatio: 0.8       # 历史压缩压力阈值(默认 0.8,继承 BasicCompactionConfig)
   retainRatio: 0.16         # 历史保留比例(默认 0.16)
@@ -90,7 +90,11 @@ config:
 - 压缩发生在 step 边界;替换遵循 harness 影子节点协议,消息保持可重建(会话日志是唯一事实源)。
 - checkpoint 必须比原文小,否则事务失败并保留原文(继承的安全语义)。
 - 无 headroom 服务时插件保持加载、压缩自动禁用,DSH 其余功能不受影响。
-- 后端为本地 Python 服务(uv 工具),首次自动安装约数百 MB;压缩幅度由 headroom 策略决定(JSON 密集内容收益最高;默认策略保守以保 KV 缓存)。
+- 后端为本地 Python 服务(uv 工具),首次自动安装约数百 MB。
+- **实测压缩收益(按内容类型,headroom 0.35 默认配置)**:中文/英文散文约 50-80%,代码约 27%,复杂 JSON 约 17%,重复 JSON 与日志接近 0%(收益不足门槛时插件保留原文,不会变差)。
+- 工具输出压缩默认阈值 8192 字符、最低收益 15%;低于阈值不压缩,收益不足不替换。
+- **更激进的压缩**:以环境变量 `HEADROOM_TARGET_RATIO=0.3`(或更小)启动 dsh web 即可让代理的文本压缩更激进(散文收益可到 80%+,代价是信息保留更少)。
+- **已知限制:CCR 原文取回目前不可用**——代理的 lossy 压缩器(Kompress,ModernBERT 模型)在 OSS 默认安装下未初始化,`/v1/compress` 走 lossless 路径不产生 CCR 记录,`headroom_retrieve` 暂无可取回的原文。压缩本身不受影响(压缩即替换,模型看到的是压缩版)。
 - 工具输出压缩阈值默认 16384 字符;低于阈值的输出不压缩,压缩收益不足 20% 不替换。
 - 与 harness 的 `compaction-basic` 冲突时自动接管(见 FAQ)。
 
