@@ -42,10 +42,11 @@ export class HeadroomClient {
    * Compress an OpenAI-style message list through the local proxy. The proxy
    * requires the `model` field for token estimation; callers may pass the
    * conversation's routed model, and the harness default stands in when they
-   * have none.
+   * have none. `mode: 'ccr'` makes the proxy write CCR retrieval hashes for
+   * lossy replacements, so `headroom_retrieve` can restore the originals.
    */
-  async compress(messages: unknown[], model = 'deepseek-chat'): Promise<HeadroomCompressResponse> {
-    const body = { messages, model }
+  async compress(messages: unknown[], model = 'deepseek-chat', mode = 'ccr'): Promise<HeadroomCompressResponse> {
+    const body = { messages, model, config: { mode } }
     const response = await fetch(`${this.baseUrl}/v1/compress`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

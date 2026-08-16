@@ -92,6 +92,11 @@ headroom:
 ```yaml
 # 插件 entry 的 config 下(设置面板未覆盖的高级项):
 config:
+  compressMode: 'ccr'         # 压缩请求模式:'ccr' 写入 CCR 取回 hash(默认,headroom_retrieve 可用);'default' 关闭
+  prewarm: true               # 启动时预热 Kompress 模型(默认 true,避免首个请求被跳过)
+  headroom:
+    savingsProfile: 'coding'  # 代理压缩画像:'agent-90' = 全部内容强制 Kompress 压缩(激进有损)
+    kompressMustKeep: true    # 保留数字/路径/标识符;false 时 JSON 收益可达 96%,但精确值会被丢弃(须配合 CCR)
   resultCompression:
     minSavingsRatio: 0.15   # 工具输出压缩的最小收益比例(默认 0.15)
     maxPerStep: 3           # 单次 step 最多压缩条数(默认 3)
@@ -105,18 +110,20 @@ config:
 - 压缩发生在 step 边界;替换遵循 harness 影子节点协议,消息保持可重建(会话日志是唯一事实源)。
 - checkpoint 必须比原文小,否则事务失败并保留原文(继承的安全语义)。
 - 无 headroom 服务时插件保持加载、压缩自动禁用,DSH 其余功能不受影响。
-- 后端为本地 Python 服务(uv 工具),首次自动安装约数百 MB。
+- 后端为本地 Python 服务(uv 工具),首次自动安装约数百 MB;Kompress 模型(`chopratejas/kompress-v2-base`,261MB ONNX)首次压缩时自动下载,插件启动预热,之后压缩走 ML 有损路径(散文 33.5%,激进配置 JSON 96%)。
 - 工具输出压缩默认阈值 8192 字符、最低收益 15%;低于阈值不压缩,收益不足不替换(负收益内容永远不会比不装更差)。
-- **更激进的压缩**:以环境变量 `HEADROOM_TARGET_RATIO=0.3`(或更小)启动 dsh web 即可让代理的文本压缩更激进(散文收益可到 80%+,代价是信息保留更少)。
-- **已知限制:CCR 原文取回目前不可用**——代理的 lossy 压缩器(Kompress,ModernBERT 模型)在 OSS 默认安装下未初始化,`/v1/compress` 走 lossless 路径不产生 CCR 记录,`headroom_retrieve` 暂无可取回的原文。压缩本身不受影响(压缩即替换,模型看到的是压缩版)。
+- **CCR 原文取回可用**(0.3.0 起):压缩请求默认 `mode: 'ccr'`,有损替换写入 CCR store,`headroom_retrieve` 按 hash 恢复原文。
+- `kompressMustKeep: false` 是有损激进模式(数字/ID/路径可能被丢弃),务必保持 CCR 模式以便取回。
 - 与 harness 的 `compaction-basic` 冲突时自动接管(见 FAQ)。
 - 完整实测数据见下方「性能实测」章节。
 
 ## 性能实测
 
-> 环境:headroom 0.35.0(OSS 默认配置)+ DeepSeek Harness web 会话。合成测量对真实代理 `POST /v1/compress`;端到端为真实会话日志统计。
+> 环境:headroom 0.35.0(OSS,Kompress ONNX 模型已加载)+ DeepSeek Harness web 会话。合成测量对真实代理 `POST /v1/compress`;端到端为真实会话日志统计。
 
 ### 按内容类型的压缩收益(上限/下限)
+
+**lossless 路径**(0.2.x,模型未启用时):
 
 | 内容类型 | 压缩收益 | 角色 |
 |---|---|---|
@@ -127,11 +134,21 @@ config:
 | 日志 / 简单文本 | ~0% | 下限(lower bound) |
 | 重复 JSON | -15%(变差) | 下限:被 15% 门槛拦截,保留原文 |
 
+**Kompress(ML 有损)路径**(0.3.0 起,模型自动下载+预热):
+
+| 场景 | 压缩收益 | 说明 |
+|---|---|---|
+| 中文散文(默认 profile) | **33.5%** | `router:text` (Kompress) |
+| JSON(agent-90 + `kompressMustKeep: false`) | **96.6%** | `router:kompress:0.03`;精确值被丢弃,须 CCR 取回 |
+| JSON(agent-90,默认 must-keep) | ~9% | must-keep 规则保留数字/路径,紧凑 JSON 几乎全命中 |
+| CCR 恢复 | 完整 | `/v1/retrieve` 按 hash 取回 56,803 字符原文(实测) |
+
 ### 端到端实测(真实会话)
 
 - 5 次影子替换落地(每次含 `compaction/prune` 定价事件 + `tool/result` 替换,会话日志可重建)。
 - 实际压缩收益 24.3% / 30.4% / 33%(text/mixed 压缩器)。
 - 0% 收益候选被正确跳过(不替换、不劣化)。
+- headless 一次性模式:修复后 `compaction/start/end` 事件与代理压缩请求均出现(0.3.0)。
 
 ### 历史压缩(长会话)
 
@@ -139,15 +156,15 @@ config:
 
 ### 结论:节省区间
 
-**默认配置下,装比不装节省 0% ~ 53%**(工具输出压缩 + 历史压缩叠加):
+**默认配置下,装比不装节省 0% ~ 53%**(工具输出压缩 + 历史压缩叠加);开启 Kompress 激进模式(`agent-90` + `kompressMustKeep: false`)后 JSON 类内容可达 **96%**,整体上限大幅上移:
 
-| 负载画像 | 预期节省 |
-|---|---|
-| 散文密集(文档阅读/总结) | 25% ~ 53% |
-| 开发混合(代码/JSON) | 18% ~ 33% |
-| 日志/重复数据(构建输出) | ~0%(无损失) |
+| 负载画像 | lossless(默认) | Kompress 激进 |
+|---|---|---|
+| 散文密集(文档阅读/总结) | 25% ~ 53% | 30% ~ 60%+ |
+| 开发混合(代码/JSON) | 18% ~ 33% | JSON 类 60% ~ 96% |
+| 日志/重复数据(构建输出) | ~0%(无损失) | 视 must-keep 配置 |
 
-激进配置(`HEADROOM_TARGET_RATIO=0.15`)下散文收益可达 81.3%。插件保证**下限恒为 0%**——负收益内容被收益门槛拦截,低于阈值的内容不触发。
+插件保证**下限恒为 0%**——负收益内容被收益门槛拦截,低于阈值的内容不触发。
 
 ## 常见问题
 

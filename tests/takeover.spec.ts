@@ -5,7 +5,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { restoreCompactionEntries, setCompactionEntries } from '../src/index.ts'
+import {
+  assertValidEngineConfig,
+  restoreCompactionEntries,
+  setCompactionEntries,
+} from '../src/index.ts'
 import type { LoaderEntryLike, LoaderLike } from '../src/index.ts'
 
 function makeEntry(id: string, disabled?: boolean | null): LoaderEntryLike {
@@ -53,6 +57,18 @@ describe('setCompactionEntries', () => {
     ])
   })
 
+  it('disables prefixed compaction-basic entries (include: subtree namespace)', async () => {
+    const prefixed = makeEntry('include:compaction-basic')
+    const unrelated = makeEntry('include:llm')
+    const loader = makeLoader([prefixed, unrelated])
+
+    const restore = await setCompactionEntries(loader, true)
+
+    expect(prefixed.options.disabled).toBe(true)
+    expect(unrelated.options.disabled).toBeUndefined()
+    expect(restore).toEqual([{ id: 'include:compaction-basic', disabled: undefined }])
+  })
+
   it('falls back to the tree-level update when the loader offers no entries view', async () => {
     const loader = makeLoader()
     const restore = await setCompactionEntries(loader, true)
@@ -87,6 +103,17 @@ describe('restoreCompactionEntries', () => {
     expect(second.parent.tree.write).toHaveBeenCalledTimes(1)
   })
 
+  it('restores prefixed compaction-basic entries recorded with their effective id', async () => {
+    const prefixed = makeEntry('include:compaction-basic', true)
+    const loader = makeLoader([prefixed])
+
+    await restoreCompactionEntries(loader, [
+      { id: 'include:compaction-basic', disabled: undefined },
+    ])
+
+    expect(prefixed.options.disabled).toBeUndefined()
+  })
+
   it('skips restore records whose entries no longer exist', async () => {
     const remaining = makeEntry('compaction-basic', true)
     const loader = makeLoader([remaining])
@@ -97,5 +124,23 @@ describe('restoreCompactionEntries', () => {
     ])).resolves.toBeUndefined()
 
     expect(remaining.options.disabled).toBeUndefined()
+  })
+})
+
+describe('assertValidEngineConfig', () => {
+  it('rejects a retained ratio at or above the threshold (the default 0.16 breaks a 0.001 threshold)', () => {
+    expect(() => assertValidEngineConfig({ thresholdRatio: 0.001 })).toThrow(/retainRatio \(0\.16\) must be less than/)
+    expect(() => assertValidEngineConfig({ thresholdRatio: 0.001, retainRatio: 0.16 })).toThrow(/retainRatio \(0\.16\) must be less than/)
+  })
+
+  it('accepts a threshold with an explicit smaller retained ratio', () => {
+    expect(() => assertValidEngineConfig({ thresholdRatio: 0.001, retainRatio: 0.0005 })).not.toThrow()
+    expect(() => assertValidEngineConfig({})).not.toThrow()
+  })
+
+  it('rejects mutually exclusive retention forms and non-finite ratios', () => {
+    expect(() => assertValidEngineConfig({ retainRatio: 0.1, retainTokens: 100 })).toThrow(/mutually exclusive/)
+    expect(() => assertValidEngineConfig({ thresholdRatio: 1.5 })).toThrow(/must be between 0 and 1/)
+    expect(() => assertValidEngineConfig({ thresholdRatio: '0.8' })).toThrow(/must be a finite number/)
   })
 })

@@ -34,6 +34,17 @@ export interface HeadroomServiceConfig {
   installTimeoutMs: number
   /** Timeout waiting for the spawned proxy to become healthy. */
   startTimeoutMs: number
+  /**
+   * Proxy savings profile; `agent-90` forces every content type through the
+   * Kompress ML compressor at a 10% keep-ratio (aggressive, lossy).
+   */
+  savingsProfile?: string
+  /**
+   * Keep exact numbers/paths/identifiers when Kompress rewrites content.
+   * `false` unlocks ~96% JSON savings but drops precise values — pair with
+   * CCR mode so `headroom_retrieve` can restore them.
+   */
+  kompressMustKeep?: boolean
 }
 
 export function resolveServiceConfig(config: Partial<HeadroomServiceConfig> | undefined): HeadroomServiceConfig {
@@ -47,6 +58,8 @@ export function resolveServiceConfig(config: Partial<HeadroomServiceConfig> | un
     autoInstall: config?.autoInstall ?? true,
     installTimeoutMs: config?.installTimeoutMs ?? 10 * 60_000,
     startTimeoutMs: config?.startTimeoutMs ?? 60_000,
+    savingsProfile: config?.savingsProfile,
+    kompressMustKeep: config?.kompressMustKeep ?? true,
   }
 }
 
@@ -178,6 +191,13 @@ export async function startHeadroomService(
   const child = spawn(launch.command, [...launch.prefix, 'proxy', '--port', String(config.port)], {
     stdio: 'ignore',
     windowsHide: true,
+    // Kompress tuning reaches the proxy through environment variables (the
+    // 0.35 click CLI does not wire the equivalent flags).
+    env: {
+      ...process.env,
+      ...config.savingsProfile === undefined ? {} : { HEADROOM_SAVINGS_PROFILE: config.savingsProfile },
+      ...config.kompressMustKeep ? {} : { HEADROOM_KOMPRESS_MUST_KEEP: '0' },
+    },
   })
   child.on('error', (error) => ctx.logger.warn('dsh-headroom: proxy failed to start: %s', errorMessage(error)))
   child.on('exit', (code) => ctx.logger.warn('dsh-headroom: proxy exited early with code %s', String(code)))

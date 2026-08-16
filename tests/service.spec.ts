@@ -35,4 +35,12 @@ describe('resolveServiceConfig', () => {
     expect(config.pythonPath).toBe('C:/Python313/python.exe')
     expect(config.uvCommand).toBe('C:/uv/uv.exe')
   })
+
+  it('passes through the kompress tuning fields with safe defaults', () => {
+    expect(resolveServiceConfig(undefined).kompressMustKeep).toBe(true)
+    expect(resolveServiceConfig(undefined).savingsProfile).toBeUndefined()
+    const config = resolveServiceConfig({ savingsProfile: 'agent-90', kompressMustKeep: false })
+    expect(config.savingsProfile).toBe('agent-90')
+    expect(config.kompressMustKeep).toBe(false)
+  })
 })

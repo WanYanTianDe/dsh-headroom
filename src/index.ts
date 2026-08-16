@@ -54,6 +54,13 @@ export interface Config {
   auto?: boolean
   /** Tool-result compression policy; the settings namespace overrides `enabled` and `thresholdChars`. */
   resultCompression?: Partial<ResultCompressionConfig>
+  /**
+   * Compress request mode: `'ccr'` makes the proxy write CCR retrieval hashes
+   * so `headroom_retrieve` can restore lossy replacements (default).
+   */
+  compressMode?: 'ccr' | 'default'
+  /** Warm the Kompress model at proxy startup so the first real request is not skipped (default true). */
+  prewarm?: boolean
 }
 
 const serviceConfigSchema = z.object({
@@ -65,6 +72,8 @@ const serviceConfigSchema = z.object({
   autoInstall: z.boolean(),
   installTimeoutMs: z.number().step(1).min(1_000),
   startTimeoutMs: z.number().step(1).min(1_000),
+  savingsProfile: z.string(),
+  kompressMustKeep: z.boolean(),
 })
 
 export const Config: z<Config> = z.object({
@@ -82,6 +91,8 @@ export const Config: z<Config> = z.object({
     minSavingsRatio: z.number(),
     maxPerStep: z.number().step(1).min(1),
   }),
+  compressMode: z.union([z.const('ccr'), z.const('default')]),
+  prewarm: z.boolean(),
 })
 
 /** Settings namespace shared with the browser card. */
@@ -158,7 +169,7 @@ export function apply(ctx: Context, config: Config): void {  ctx.provide('headro
     applies: 'live',
   })
 
-  installProxyLifecycle(ctx, scope)
+  installProxyLifecycle(ctx, scope, config)
 
   // Tool-result compression runs before the historical compaction pass, so
   // the surface the compaction prices is already slimmed.
@@ -217,6 +228,7 @@ function liveResultConfig(scope: SettingsScope<HeadroomSettings>, config: Config
 function installProxyLifecycle(
   ctx: Context,
   scope: SettingsScope<HeadroomSettings>,
+  config: Config,
 ): void {
   ctx.effect(() => {
     let current: { dispose: () => void } | undefined
@@ -245,6 +257,7 @@ function installProxyLifecycle(
         }
         lastLaunchKey = launchKey
         const service = resolveServiceConfig({
+          ...config.headroom,
           command: settings.command || undefined,
           pythonPath: settings.pythonPath || undefined,
           uvCommand: settings.uvCommand || undefined,
@@ -256,6 +269,15 @@ function installProxyLifecycle(
         if (id !== generation) {
           started.dispose()
           return
+        }
+        if (config.prewarm !== false && started.client !== undefined) {
+          // Warm the Kompress model so the first real compression is not
+          // skipped while the model loads (a noop there would be cached).
+          void started.client.compress(
+            [{ role: 'user', content: 'headroom prewarm' }],
+            'deepseek-chat',
+            'default',
+          ).catch(() => undefined)
         }
         if (started.reused) {
           // An already-healthy proxy keeps the previous owner's dispose.
@@ -282,6 +304,50 @@ function installProxyLifecycle(
   }, 'dsh-headroom: proxy lifecycle')
 }
 
+/** BasicCompactionEngine's default retention ratio, mirrored for load-time validation. */
+const DEFAULT_RETAIN_RATIO = 0.16
+
+/**
+ * Validate the effective compaction policy the headroom engine would resolve,
+ * mirroring BasicCompactionConfig's load-time checks (`resolveConfig` is not
+ * exported from the compaction-basic package). The point is not to duplicate
+ * the harness policy engine but to catch a rejected config BEFORE any Service
+ * registration, so a bad policy cannot leave a half-initialized `compaction`
+ * service behind.
+ * @param config - the engine config passed to {@link HeadroomCompactionEngine}.
+ * @throws the same style of `BasicCompactionConfig: ...` errors the engine
+ * constructor would throw, on any load-time-invalid policy.
+ */
+export function assertValidEngineConfig(config: HeadroomEngineConfig): void {
+  const ratio = (name: string, value: number): void => {
+    if (value < 0 || value > 1) {
+      throw new Error(`BasicCompactionConfig: ${name} (${value}) must be between 0 and 1`)
+    }
+  }
+  const numberOrThrow = (name: string, value: unknown): number | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`BasicCompactionConfig: ${name} must be a finite number`)
+    }
+    return value
+  }
+  const thresholdRatio = numberOrThrow('thresholdRatio', config.thresholdRatio) ?? 0.8
+  ratio('thresholdRatio', thresholdRatio)
+  const retainRatio = numberOrThrow('retainRatio', config.retainRatio)
+  const retainTokens = numberOrThrow('retainTokens', config.retainTokens)
+  if (retainRatio !== undefined) ratio('retainRatio', retainRatio)
+  if (retainRatio !== undefined && retainTokens !== undefined) {
+    throw new Error('BasicCompactionConfig: retainRatio and retainTokens are mutually exclusive')
+  }
+  const resolvedRetainRatio = retainRatio ?? (retainTokens === undefined ? DEFAULT_RETAIN_RATIO : undefined)
+  if (resolvedRetainRatio !== undefined && resolvedRetainRatio >= thresholdRatio) {
+    throw new Error(
+      `BasicCompactionConfig: retainRatio (${resolvedRetainRatio}) must be less than `
+      + `the resolved thresholdRatio (${thresholdRatio})`,
+    )
+  }
+}
+
 /**
  * Register the headroom compaction engine as `ctx.compaction`. The Service
  * constructor provides the name immediately, so a duplicate-registration
@@ -291,6 +357,18 @@ function installProxyLifecycle(
  * plugin unloads (see {@link installTakeoverRollback}).
  */
 function installEngine(ctx: Context, config: Config): void {
+  // Validate the compaction policy BEFORE any Service registration: a rejected
+  // config (e.g. `retainRatio >= thresholdRatio`) would otherwise leave a
+  // half-initialized `compaction` service behind (the Cordis Service
+  // constructor registers before `BasicCompactionEngine` resolves config),
+  // silently disabling automatic compaction. Fail loud and keep the
+  // compaction-basic backend untouched instead.
+  try {
+    assertValidEngineConfig(engineConfig(config))
+  } catch (error) {
+    ctx.logger.warn('dsh-headroom: invalid compaction config, keeping the default backend: %s', message(error))
+    return
+  }
   try {
     new HeadroomCompactionEngine(ctx, engineConfig(config))
     ctx.logger.info('dsh-headroom: compaction engine registered (backend=headroom)')
@@ -327,6 +405,17 @@ function loaderOf(ctx: Context): LoaderLike | undefined {
 }
 
 /**
+ * Whether a loader entry names the `compaction-basic` row. The effective id
+ * carries the owning subtree's prefix (`include:compaction-basic` under the
+ * file-backed include tree), so the bare id alone never matches; the suffix
+ * keeps the match robust to any prefixing layer while staying blind to ids
+ * that merely end in the same name from a different namespace.
+ */
+function isCompactionEntry(entry: LoaderEntryLike): boolean {
+  return entry.id === 'compaction-basic' || entry.id.endsWith(':compaction-basic')
+}
+
+/**
  * Set every `compaction-basic` entry's disabled flag across the loader tree.
  * Patch and preset layers can each carry an entry under the same id, and a
  * bare `loader.update(id, ...)` only touches the first match in the current
@@ -341,7 +430,7 @@ export async function setCompactionEntries(
   loader: LoaderLike,
   disabled: boolean,
 ): Promise<Array<{ id: string; disabled?: boolean | null }>> {
-  const targets = [...(loader.entries?.() ?? [])].filter((entry) => entry.id === 'compaction-basic')
+  const targets = [...(loader.entries?.() ?? [])].filter(isCompactionEntry)
   if (targets.length === 0) {
     await loader.update('compaction-basic', { disabled })
     return [{ id: 'compaction-basic', disabled }]
@@ -366,7 +455,7 @@ export async function restoreCompactionEntries(
   loader: LoaderLike,
   restore: Array<{ id: string; disabled?: boolean | null }>,
 ): Promise<void> {
-  const targets = [...(loader.entries?.() ?? [])].filter((entry) => entry.id === 'compaction-basic')
+  const targets = [...(loader.entries?.() ?? [])].filter(isCompactionEntry)
   for (const [index, item] of restore.entries()) {
     const entry = targets[index]
     if (entry === undefined) continue
@@ -390,6 +479,15 @@ async function takeOverCompaction(ctx: Context, config: Config): Promise<void> {
     compactionTakenOver = true
     ctx.logger.info('dsh-headroom: disabled compaction-basic entries and registered the headroom engine')
   } catch (error) {
+    // The takeover left compaction-basic disabled but could not mount the
+    // headroom engine: restore the original entries so the harness keeps a
+    // working compaction backend instead of a service vacuum.
+    try {
+      await restoreCompactionEntries(loader, compactionRestore)
+      compactionRestore = []
+    } catch (restoreError) {
+      ctx.logger.warn('dsh-headroom: could not restore compaction-basic after takeover failure: %s', message(restoreError))
+    }
     ctx.logger.warn('dsh-headroom: could not take over the compaction service: %s', message(error))
   }
 }

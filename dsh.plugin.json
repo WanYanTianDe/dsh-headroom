@@ -1,6 +1,6 @@
-﻿{
+{
   "id": "@wanyantiande/dsh-headroom",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "main": "./lib/index.js",
   "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, the headroom_retrieve CCR tool, and a settings card.",
   "client": {
@@ -21,4 +21,5 @@
     "skills": []
   }
 }
+
 
