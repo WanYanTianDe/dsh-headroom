@@ -1,6 +1,6 @@
 {
   "name": "@wanyantiande/dsh-headroom",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "type": "module",
   "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, the headroom_retrieve CCR tool, and a settings card.",

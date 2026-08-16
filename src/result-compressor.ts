@@ -19,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type { Session, SessionEvent, ToolResultMessage } from '@deepseek-ai/dsh-session'
 import type { HeadroomClient, HeadroomCompressResponse } from './client.ts'
+import { routedModel } from './engine.ts'
 
 /** Prefix marking a headroom-compressed tool result; scanners skip these. */
 export const COMPRESSED_RESULT_PREFIX = '[compressed by headroom'
@@ -164,6 +165,7 @@ function resultBlock(message: ToolResultMessage): Extract<ContentBlock, { type: 
  * fails.
  * @param ctx - context providing the token meter for shadow pricing.
  * @param client - healthy headroom proxy client.
+ * @param agent - agent owning the session; its routed model reports to the proxy.
  * @param session - session whose current surface is rewritten.
  * @param config - resolved tool-result compression policy.
  * @param signal - cancellation; a pass aborts between candidates.
@@ -172,6 +174,7 @@ function resultBlock(message: ToolResultMessage): Extract<ContentBlock, { type: 
 export async function compressSessionResults(
   ctx: Context,
   client: HeadroomClient,
+  agent: Agent,
   session: Session,
   config: ResultCompressionConfig,
   signal?: AbortSignal,
@@ -189,7 +192,13 @@ export async function compressSessionResults(
       .join('\n')
     if (text.length === 0) continue
 
-    const response = await client.compress([{ role: 'tool', tool_call_id: result.toolCallId, content: text }])
+    // The proxy requires a model for token estimation; the routed model is
+    // the honest estimate, the harness default stands in before any request.
+    const model = routedModel(agent) ?? 'deepseek-chat'
+    const response = await client.compress(
+      [{ role: 'tool', tool_call_id: result.toolCallId, content: text }],
+      model,
+    )
     signal?.throwIfAborted()
     const compressed = compressedText(response)
     if (compressed === undefined) continue
@@ -245,7 +254,7 @@ export function installResultCompression(
     const client = ctx.headroomClient
     if (config.enabled && client !== undefined && !signal.aborted) {
       try {
-        const outcomes = await compressSessionResults(ctx, client, agent.session, config, signal)
+        const outcomes = await compressSessionResults(ctx, client, agent, agent.session, config, signal)
         if (outcomes.length > 0) {
           const before = outcomes.reduce((sum, outcome) => sum + outcome.tokensBefore, 0)
           const after = outcomes.reduce((sum, outcome) => sum + outcome.tokensAfter, 0)

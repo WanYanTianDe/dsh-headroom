@@ -77,7 +77,7 @@ export class HeadroomCompactionEngine extends BasicCompactionEngine {
 }
 
 /** The conversation's routed model, when the session has one. */
-function routedModel(agent: Agent): string | undefined {
+export function routedModel(agent: Agent): string | undefined {
   const header = agent.session.requestHeader()?.config
   if (header !== undefined && header.model.length > 0) return header.model
   if (agent.options.model !== undefined && agent.options.model.length > 0) {

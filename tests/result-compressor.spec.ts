@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
@@ -63,6 +64,7 @@ function mockClient(response: Partial<HeadroomCompressResponse> = {}) {
   return { client: { compress } as unknown as HeadroomClient, compress }
 }
 
+const mockAgent = { session: { requestHeader: () => undefined }, options: {} } as unknown as Agent
 const mockCtx = { tokenMeter: { estimateMessage: () => 100 } } as unknown as Context
 
 describe('measureText', () => {
@@ -75,7 +77,7 @@ describe('measureText', () => {
 
 describe('isCompressedResult', () => {
   it('recognizes the compression marker on the first text block', () => {
-    expect(isCompressedResult([{ type: 'text', text: `${COMPRESSED_RESULT_PREFIX}: 1000 → 100` }])).toBe(true)
+    expect(isCompressedResult([{ type: 'text', text: `${COMPRESSED_RESULT_PREFIX}: 1000 →100` }])).toBe(true)
     expect(isCompressedResult([{ type: 'text', text: 'plain output' }])).toBe(false)
     expect(isCompressedResult([{ type: 'reasoning', text: COMPRESSED_RESULT_PREFIX }])).toBe(false)
     expect(isCompressedResult([])).toBe(false)
@@ -130,7 +132,7 @@ describe('scanResultCandidates', () => {
     const big = toolResultEvent(5, 'x'.repeat(20_000))
     const small = toolResultEvent(6, 'tiny')
     const marked = toolResultEvent(7, 'x'.repeat(20_000))
-    marked.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 → 1]`
+    marked.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
     const { session } = makeSession([big, small, marked, { type: 'user/message', seq: 8, time: 1, data: {} }])
     const candidates = scanResultCandidates(session, 16_384)
     expect(candidates.map((candidate) => candidate.seq)).toEqual([5])
@@ -142,9 +144,12 @@ describe('compressSessionResults', () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client, compress } = mockClient()
-    const outcomes = await compressSessionResults(mockCtx, client, session, resolveResultCompression(undefined))
+    const outcomes = await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
 
-    expect(compress).toHaveBeenCalledWith([{ role: 'tool', tool_call_id: 'call-1', content: 'x'.repeat(20_000) }])
+    expect(compress).toHaveBeenCalledWith(
+      [{ role: 'tool', tool_call_id: 'call-1', content: 'x'.repeat(20_000) }],
+      'deepseek-chat',
+    )
     expect(appended).toHaveLength(2)
     expect(appended[0]).toMatchObject({
       type: 'compaction/prune',
@@ -164,16 +169,16 @@ describe('compressSessionResults', () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client } = mockClient({ tokens_after: 900 })
-    await compressSessionResults(mockCtx, client, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
     expect(appended).toHaveLength(0)
   })
 
   it('skips nodes already carrying the compression marker', async () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
-    event.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 → 1]`
+    event.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
     const { session, appended } = makeSession([event])
     const { client } = mockClient()
-    await compressSessionResults(mockCtx, client, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
     expect(appended).toHaveLength(0)
   })
 
@@ -183,7 +188,7 @@ describe('compressSessionResults', () => {
       toolResultEvent(6, 'y'.repeat(20_000), 'call-2'),
     ])
     const { client } = mockClient()
-    await compressSessionResults(mockCtx, client, session, resolveResultCompression({ maxPerStep: 1 }))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression({ maxPerStep: 1 }))
     expect(appended).toHaveLength(2)
   })
 
@@ -191,7 +196,7 @@ describe('compressSessionResults', () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client } = mockClient({ messages: [], tokens_after: 50 })
-    await compressSessionResults(mockCtx, client, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
     expect(appended).toHaveLength(0)
   })
 })
