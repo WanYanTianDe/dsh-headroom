@@ -266,13 +266,80 @@ function installEngine(ctx: Context, config: Config): void {
   }
 }
 
-/** Whether this plugin disabled the compaction-basic loader entry at runtime. */
+/** Whether this plugin disabled compaction-basic loader entries at runtime. */
 let compactionTakenOver = false
+/** Original disabled flags of the entries this plugin disabled, for rollback. */
+let compactionRestore: Array<{ id: string; disabled?: boolean | null }> = []
+
+/** Loader-surface view this plugin needs; the loader service is not typed on Context. */
+export interface LoaderEntryLike {
+  id: string
+  options: { disabled?: boolean | null }
+  update(options: { disabled?: boolean | null }, create?: boolean, force?: boolean): Promise<unknown>
+  parent: { tree: { write(): void } }
+}
+
+/** Loader-surface view this plugin needs; the loader service is not typed on Context. */
+export interface LoaderLike {
+  entries?(): Iterable<LoaderEntryLike>
+  update(id: string, options: { disabled: boolean }, parent?: string | null): Promise<unknown>
+}
+
+function loaderOf(ctx: Context): LoaderLike | undefined {
+  return (ctx as unknown as { loader?: LoaderLike }).loader
+}
+
+/**
+ * Set every `compaction-basic` entry's disabled flag across the loader tree.
+ * Patch and preset layers can each carry an entry under the same id, and a
+ * bare `loader.update(id, ...)` only touches the first match in the current
+ * tree, so the takeover walks `entries()` instead. When the loader offers no
+ * `entries()` view, falls back to the tree-level update. Returns each touched
+ * entry's previous `disabled` value so the caller can restore them on unload.
+ * @param loader - the loader service surface.
+ * @param disabled - the disabled flag to write onto every match.
+ * @returns per-entry restore records (id plus the previous disabled value).
+ */
+export async function setCompactionEntries(
+  loader: LoaderLike,
+  disabled: boolean,
+): Promise<Array<{ id: string; disabled?: boolean | null }>> {
+  const targets = [...(loader.entries?.() ?? [])].filter((entry) => entry.id === 'compaction-basic')
+  if (targets.length === 0) {
+    await loader.update('compaction-basic', { disabled })
+    return [{ id: 'compaction-basic', disabled }]
+  }
+  const restore = targets.map((entry) => ({ id: entry.id, disabled: entry.options.disabled }))
+  for (const entry of targets) {
+    await entry.update({ disabled }, false, true)
+    entry.parent.tree.write()
+  }
+  return restore
+}
+
+/**
+ * Restore the disabled flags recorded by {@link setCompactionEntries}, pairing
+ * restore records with the tree's current `compaction-basic` entries in order.
+ * Entries that no longer exist are skipped; a record with `disabled` unset
+ * removes the flag again (the entry re-inherits its composition default).
+ * @param loader - the loader service surface.
+ * @param restore - records previously returned by {@link setCompactionEntries}.
+ */
+export async function restoreCompactionEntries(
+  loader: LoaderLike,
+  restore: Array<{ id: string; disabled?: boolean | null }>,
+): Promise<void> {
+  const targets = [...(loader.entries?.() ?? [])].filter((entry) => entry.id === 'compaction-basic')
+  for (const [index, item] of restore.entries()) {
+    const entry = targets[index]
+    if (entry === undefined) continue
+    await entry.update({ disabled: item.disabled }, false, true)
+    entry.parent.tree.write()
+  }
+}
 
 async function takeOverCompaction(ctx: Context, config: Config): Promise<void> {
-  const loader = (ctx as unknown as {
-    loader?: { update(id: string, options: { disabled: boolean }): Promise<unknown> }
-  }).loader
+  const loader = loaderOf(ctx)
   if (loader === undefined) {
     ctx.logger.warn(
       'dsh-headroom: no loader available to take over the compaction service; '
@@ -281,17 +348,17 @@ async function takeOverCompaction(ctx: Context, config: Config): Promise<void> {
     return
   }
   try {
-    await loader.update('compaction-basic', { disabled: true })
+    compactionRestore = await setCompactionEntries(loader, true)
     new HeadroomCompactionEngine(ctx, engineConfig(config))
     compactionTakenOver = true
-    ctx.logger.info('dsh-headroom: disabled compaction-basic and registered the headroom engine')
+    ctx.logger.info('dsh-headroom: disabled compaction-basic entries and registered the headroom engine')
   } catch (error) {
     ctx.logger.warn('dsh-headroom: could not take over the compaction service: %s', message(error))
   }
 }
 
 /**
- * Restore the disabled compaction-basic entry when this plugin unloads, so
+ * Restore the disabled compaction-basic entries when this plugin unloads, so
  * the harness keeps a working compaction service after dsh-headroom is
  * removed. The restore retries until the headroom engine's `compaction`
  * service has been released by this fiber's disposal (disposers run in
@@ -303,23 +370,21 @@ function installTakeoverRollback(ctx: Context): void {
     return async () => {
       if (!compactionTakenOver || attempted) return
       attempted = true
-      const loader = (ctx as unknown as {
-        loader?: { update(id: string, options: { disabled: boolean }): Promise<unknown> }
-      }).loader
+      const loader = loaderOf(ctx)
       if (loader === undefined) return
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 50))
         try {
-          await loader.update('compaction-basic', { disabled: false })
-          ctx.logger.info('dsh-headroom: re-enabled compaction-basic on unload')
+          await restoreCompactionEntries(loader, compactionRestore)
+          ctx.logger.info('dsh-headroom: restored compaction-basic entries on unload')
           return
         } catch {
           // compaction service still held by this fiber's disposal; retry
         }
       }
       ctx.logger.warn(
-        'dsh-headroom: could not re-enable compaction-basic on unload; '
-        + 'remove its `disabled: true` marker in the loader tree or restart dsh web',
+        'dsh-headroom: could not restore compaction-basic entries on unload; '
+        + 'remove their `disabled: true` markers in the loader tree or restart dsh web',
       )
     }
   }, 'dsh-headroom: compaction takeover rollback')
