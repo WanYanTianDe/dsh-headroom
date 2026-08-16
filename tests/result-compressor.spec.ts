@@ -144,7 +144,7 @@ describe('compressSessionResults', () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client, compress } = mockClient()
-    const outcomes = await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
+    const outcomes = await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), new Set())
 
     expect(compress).toHaveBeenCalledWith(
       [{ role: 'tool', tool_call_id: 'call-1', content: 'x'.repeat(20_000) }],
@@ -169,7 +169,7 @@ describe('compressSessionResults', () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client } = mockClient({ tokens_after: 900 })
-    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), new Set())
     expect(appended).toHaveLength(0)
   })
 
@@ -178,7 +178,7 @@ describe('compressSessionResults', () => {
     event.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
     const { session, appended } = makeSession([event])
     const { client } = mockClient()
-    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), new Set())
     expect(appended).toHaveLength(0)
   })
 
@@ -188,15 +188,30 @@ describe('compressSessionResults', () => {
       toolResultEvent(6, 'y'.repeat(20_000), 'call-2'),
     ])
     const { client } = mockClient()
-    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression({ maxPerStep: 1 }))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression({ maxPerStep: 1 }), new Set())
     expect(appended).toHaveLength(2)
+  })
+
+  it('skips previously attempted candidates so later passes advance', async () => {
+    const event = toolResultEvent(5, 'x'.repeat(20_000))
+    const { session, appended } = makeSession([event])
+    const { client, compress } = mockClient({ tokens_after: 900 }) // 无收益
+    const attempted = new Set<number>()
+
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), attempted)
+    expect(appended).toHaveLength(0)
+    expect(attempted.has(5)).toBe(true)
+
+    // 第二次调用跳过已尝试的 seq,不再发起代理请求
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), attempted)
+    expect(compress).toHaveBeenCalledTimes(1)
   })
 
   it('degrades to the original when the proxy output is unusable', async () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
     const { session, appended } = makeSession([event])
     const { client } = mockClient({ messages: [], tokens_after: 50 })
-    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined))
+    await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), new Set())
     expect(appended).toHaveLength(0)
   })
 })

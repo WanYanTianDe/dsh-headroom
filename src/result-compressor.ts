@@ -168,6 +168,9 @@ function resultBlock(message: ToolResultMessage): Extract<ContentBlock, { type: 
  * @param agent - agent owning the session; its routed model reports to the proxy.
  * @param session - session whose current surface is rewritten.
  * @param config - resolved tool-result compression policy.
+ * @param attempted - seqs already tried without a replacement; the pass skips
+ * them so low-yield candidates ahead of better ones cannot starve the budget.
+ * Every tried seq (replaced or not) is added, so later passes advance.
  * @param signal - cancellation; a pass aborts between candidates.
  * @returns landed replacements with token accounting.
  */
@@ -177,11 +180,15 @@ export async function compressSessionResults(
   agent: Agent,
   session: Session,
   config: ResultCompressionConfig,
+  attempted: Set<number>,
   signal?: AbortSignal,
 ): Promise<ResultCompressOutcome[]> {
-  const candidates = scanResultCandidates(session, config.thresholdChars).slice(0, config.maxPerStep)
+  const candidates = scanResultCandidates(session, config.thresholdChars)
+    .filter((candidate) => !attempted.has(candidate.seq))
+    .slice(0, config.maxPerStep)
   const outcomes: ResultCompressOutcome[] = []
   for (const { seq, event } of candidates) {
+    attempted.add(seq)
     signal?.throwIfAborted()
     const message = event.data.message
     const result = resultBlock(message)
@@ -249,12 +256,20 @@ export function installResultCompression(
   ctx: Context,
   resolveConfig: () => ResultCompressionConfig,
 ): void {
+  // Tried-but-unprofitable tool results per session, so later passes advance
+  // past them instead of re-attempting the same low-yield candidates.
+  const attempted = new WeakMap<Session, Set<number>>()
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const config = resolveConfig()
     const client = ctx.headroomClient
     if (config.enabled && client !== undefined && !signal.aborted) {
       try {
-        const outcomes = await compressSessionResults(ctx, client, agent, agent.session, config, signal)
+        let tried = attempted.get(agent.session)
+        if (tried === undefined) {
+          tried = new Set<number>()
+          attempted.set(agent.session, tried)
+        }
+        const outcomes = await compressSessionResults(ctx, client, agent, agent.session, config, tried, signal)
         if (outcomes.length > 0) {
           const before = outcomes.reduce((sum, outcome) => sum + outcome.tokensBefore, 0)
           const after = outcomes.reduce((sum, outcome) => sum + outcome.tokensAfter, 0)
