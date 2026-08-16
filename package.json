@@ -2,9 +2,8 @@
   "name": "@dsh-external/dsh-headroom",
   "version": "0.1.0",
   "license": "MIT",
-  "private": true,
   "type": "module",
-  "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, and the headroom_retrieve CCR tool.",
+  "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, the headroom_retrieve CCR tool, and a settings card.",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
