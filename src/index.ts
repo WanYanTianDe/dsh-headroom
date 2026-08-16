@@ -226,6 +226,9 @@ function installProxyLifecycle(
         current?.dispose()
         ctx.reflect.set('headroomClient', started.client)
         current = { dispose: started.dispose }
+      }).catch((error: unknown) => {
+        // A failed restart must not break later ones: keep the queue alive.
+        ctx.logger.warn('dsh-headroom: proxy restart failed: %s', message(error))
       })
     }
 

@@ -77,21 +77,14 @@ async function resolveLaunch(
     if (py !== undefined) {
       // Installed wheels expose `headroom.cli`; some builds also ship
       // `headroom.__main__` (`-m headroom`). Probe both, prefer the former.
-      const cliProbe = spawnSync(py, ['-m', 'headroom.cli', '--version'], {
-        stdio: 'ignore',
-        timeout: 10_000,
-        shell: false,
-      })
-      if (cliProbe.error === undefined && cliProbe.status !== null) {
+      // A probe that hangs or throws must not break the restart chain.
+      const cliOk = probeModule(py, ['-m', 'headroom.cli', '--version'])
+      if (cliOk) {
         ctx.logger.info('dsh-headroom: using python %s (-m headroom.cli)', py)
         return { command: py, prefix: ['-m', 'headroom.cli'] }
       }
-      const pkgProbe = spawnSync(py, ['-m', 'headroom', '--version'], {
-        stdio: 'ignore',
-        timeout: 10_000,
-        shell: false,
-      })
-      if (pkgProbe.error === undefined && pkgProbe.status !== null) {
+      const pkgOk = probeModule(py, ['-m', 'headroom', '--version'])
+      if (pkgOk) {
         ctx.logger.info('dsh-headroom: using python %s (-m headroom)', py)
         return { command: py, prefix: ['-m', 'headroom'] }
       }
@@ -106,6 +99,20 @@ async function resolveLaunch(
   const command = findExecutable(config.command) ?? findOnPath('headroom') ?? uvToolBin('headroom')
   if (command !== undefined) return { command, prefix: [] }
   return undefined
+}
+
+/** Probe one `python -m <module>` invocation; only a clean exit 0 means yes. */
+function probeModule(py: string, args: string[]): boolean {
+  try {
+    const probe = spawnSync(py, args, {
+      stdio: 'ignore',
+      timeout: 8_000,
+      shell: false,
+    })
+    return probe.error === undefined && probe.status === 0
+  } catch {
+    return false
+  }
 }
 
 /**
