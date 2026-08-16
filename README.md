@@ -4,7 +4,23 @@
 
 > 非官方社区插件,与 Headroom Labs / DeepSeek 无隶属关系。
 
-## 装它(一条命令)
+## 装它
+
+### 方式一:npm 安装(推荐,已发布到 npm registry)
+
+```bash
+# 在 profile 目录(~/.dsh/profiles/web)执行,把包装进 profile:
+pnpm add @wanyantiande/dsh-headroom
+
+# 然后编辑 cordis.patch.yml,加:
+#   - insert:
+#       - id: dsh-headroom
+#         name: '@wanyantiande/dsh-headroom'
+```
+
+**重启 dsh web** 即可用,打开 **设置 → 插件** 能看到 **"Headroom 压缩"** 卡片。
+
+### 方式二:从源码装(开发/本地修改用)
 
 ```bash
 # 1. 拿到代码
@@ -25,8 +41,6 @@ node scripts/install.mjs
 > #       - id: dsh-headroom
 > #         name: '@wanyantiande/dsh-headroom'
 > ```
-
-装好后,打开 **设置 → 插件**,能看到 **"Headroom 压缩"** 卡片,就成了。
 
 ## 用起来(什么都不用做)
 
@@ -78,7 +92,7 @@ pnpm build                 # 打包 → lib/index.js + lib/client.js
 
 | 项 | 值 |
 |---|---|
-| npm 包名 | `@wanyantiande/dsh-headroom` |
+| npm 包名 | `@wanyantiande/dsh-headroom`(npm registry, public) |
 | GitHub topic | `dsh-plugin` |
 | 分类(taxonomy v2) | 🤖 Agent 能力 |
 | 测试 | vitest 19 例(format/service/controller) |
