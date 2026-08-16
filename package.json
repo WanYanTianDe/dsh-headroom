@@ -1,0 +1,65 @@
+{
+  "name": "dsh-headroom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, and the headroom_retrieve CCR tool.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-compaction": "*",
+    "@deepseek-ai/dsh-compaction-basic": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-token-meter": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../source/current/vendor/cordis",
+    "@deepseek-ai/dsh-agent": "link:../../source/current/packages/core/agent",
+    "@deepseek-ai/dsh-client-locale": "link:../../source/current/packages/client/locale",
+    "@deepseek-ai/dsh-client-runtime": "link:../../source/current/packages/client/runtime",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../source/current/packages/client/ui-slots",
+    "@deepseek-ai/dsh-compaction": "link:../../source/current/packages/compaction/compaction",
+    "@deepseek-ai/dsh-compaction-basic": "link:../../source/current/packages/compaction/compaction-basic",
+    "@deepseek-ai/dsh-llm": "link:../../source/current/packages/llm/llm",
+    "@deepseek-ai/dsh-session": "link:../../source/current/packages/core/session",
+    "@deepseek-ai/dsh-settings": "link:../../source/current/packages/settings/settings",
+    "@deepseek-ai/dsh-token-meter": "link:../../source/current/packages/llm/token-meter",
+    "@deepseek-ai/dsh-tools": "link:../../source/current/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../source/current/vendor/schemastery",
+    "@types/node": "link:../../source/current/node_modules/@types/node",
+    "@types/react": "~18.3.1",
+    "lightningcss": "^1.32.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.10.0",
+    "typescript": "^5.5.0"
+  }
+}

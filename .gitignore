@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build cache and temp
+*.log
+*.tsbuildinfo
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

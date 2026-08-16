@@ -1,0 +1,23 @@
+{
+  "id": "dsh-headroom",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "Headroom context-compression backend for DeepSeek Harness: local proxy lifecycle, a compaction engine backend, the headroom_retrieve CCR tool, and a settings card.",
+  "client": {
+    "main": "./lib/client.js",
+    "inject": [
+      "@deepseek-ai/dsh-client-runtime",
+      "@deepseek-ai/dsh-client-locale",
+      "@deepseek-ai/dsh-client-ui-settings"
+    ]
+  },
+  "engines": {
+    "dsh": ">=0.0.1"
+  },
+  "contributes": {
+    "tools": [
+      "headroom_retrieve"
+    ],
+    "skills": []
+  }
+}
