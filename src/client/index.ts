@@ -9,7 +9,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from './slots.ts'
 import { HeadroomCard } from './HeadroomCard.tsx'
-import { HeadroomCardController } from './headroom-card-controller.ts'
+import { HeadroomCardController, HEADROOM_NS } from './headroom-card-controller.ts'
 import { en, zh } from './locales.ts'
 
 /** Dictionary namespace owned by this plugin. */
@@ -32,8 +32,9 @@ export function apply(ctx: ClientContext): void {
     yield ctx.slots.register(
       {
         name: 'settings.plugin.item',
-        id: 'dsh-headroom',
-        order: 60,
+        // The slot is `keyed` and keyed on the settings namespace this card
+        // edits; the harness tab pairs cards to served namespaces by this key.
+        key: HEADROOM_NS,
         locale: NS,
         inject: () => controller.inject(),
       },

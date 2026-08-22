@@ -21,7 +21,7 @@ declare module '@deepseek-ai/cordis' {
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** One plugin card inside the settings plugin section. */
-    'settings.plugin.item': { kind: 'list'; scope: 'root'; owner: { children?: never } }
+    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: { children?: never } }
   }
 
   interface LocaleNamespaceMap {
