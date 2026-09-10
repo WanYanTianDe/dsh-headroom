@@ -14,7 +14,7 @@
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-store",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings"
       ],
@@ -48,7 +48,8 @@
     "@deepseek-ai/cordis": "link:../../source/current/vendor/cordis",
     "@deepseek-ai/dsh-agent": "link:../../source/current/packages/core/agent",
     "@deepseek-ai/dsh-client-locale": "link:../../source/current/packages/client/locale",
-    "@deepseek-ai/dsh-client-runtime": "link:../../source/current/packages/client/runtime",
+    "@deepseek-ai/dsh-client-store": "link:../../source/current/packages/client/store",
+    "@deepseek-ai/dsh-client-ui-settings": "link:../../source/current/packages/client/ui-settings",
     "@deepseek-ai/dsh-client-ui-slots": "link:../../source/current/packages/client/ui-slots",
     "@deepseek-ai/dsh-compaction": "link:../../source/current/packages/compaction/compaction",
     "@deepseek-ai/dsh-compaction-basic": "link:../../source/current/packages/compaction/compaction-basic",

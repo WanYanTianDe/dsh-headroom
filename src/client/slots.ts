@@ -6,7 +6,7 @@
  * register a card without a build-time dependency on that package.
  */
 
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { HeadroomKey } from './locales.ts'
 
 declare module '@deepseek-ai/cordis' {

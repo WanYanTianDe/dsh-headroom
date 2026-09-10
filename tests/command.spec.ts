@@ -6,11 +6,11 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { HeadroomCommandScope } from '../src/command.ts'
 import { executeHeadroomCommand, parseHeadroomCommand } from '../src/command.ts'
 
-const NS = settingsNamespace('headroom')
+const NS = 'headroom' as SettingsNamespace
 
 function makeScope(initial: Record<string, unknown> = {}) {
   const value: Record<string, unknown> = { ...initial }

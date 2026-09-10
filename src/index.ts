@@ -21,8 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { SettingsNamespace, SettingsScope } from '@deepseek-ai/dsh-settings'
 import { HeadroomCompactionEngine } from './engine.ts'
 import type { HeadroomEngineConfig } from './engine.ts'
 import { DEFAULT_HEADROOM_PORT, resolveServiceConfig, startHeadroomService } from './service.ts'
@@ -96,7 +95,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** Settings namespace shared with the browser card. */
-export const HEADROOM_SETTINGS_NS = settingsNamespace('headroom')
+export const HEADROOM_SETTINGS_NS = 'headroom' as SettingsNamespace
 
 /** Fields the settings card edits; optional fields fall back to the composition layer. */
 export interface HeadroomSettings {

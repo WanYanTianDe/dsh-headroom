@@ -5,8 +5,8 @@
  * without importing the internal ui-settings-plugins form machinery.
  */
 
-import type { SettingsScope, SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 /** Settings namespace shared with the host plugin. */
 export const HEADROOM_NS = 'headroom'

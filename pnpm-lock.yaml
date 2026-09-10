@@ -21,9 +21,12 @@ importers:
       '@deepseek-ai/dsh-client-locale':
         specifier: link:../../source/current/packages/client/locale
         version: link:../../source/current/packages/client/locale
-      '@deepseek-ai/dsh-client-runtime':
-        specifier: link:../../source/current/packages/client/runtime
-        version: link:../../source/current/packages/client/runtime
+      '@deepseek-ai/dsh-client-store':
+        specifier: link:../../source/current/packages/client/store
+        version: link:../../source/current/packages/client/store
+      '@deepseek-ai/dsh-client-ui-settings':
+        specifier: link:../../source/current/packages/client/ui-settings
+        version: link:../../source/current/packages/client/ui-settings
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: link:../../source/current/packages/client/ui-slots
         version: link:../../source/current/packages/client/ui-slots
