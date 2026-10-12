@@ -28,8 +28,10 @@ function toolResultEvent(seq: number, text: string, callId = 'call-1') {
     data: {
       message: {
         role: 'tool',
-        source: { callId, plugin: 'mock' },
-        content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }] }],
+        toolCallId: callId,
+        isError: false,
+        source: { kind: 'tool', callId },
+        content: [{ type: 'text', text }],
       },
     },
   }
@@ -41,7 +43,7 @@ function makeSession(events: Array<Record<string, unknown>>) {
   const appended: Array<{ type: string; data: unknown; opts?: unknown }> = []
   const session = {
     surface: { nodes: Object.keys(bySeq).map(Number) },
-    events: bySeq,
+    eventAt: (seq: number) => bySeq[seq],
     append: (type: string, data: unknown, opts?: unknown) => {
       appended.push({ type, data, opts })
       return { seq: 100 + appended.length }
@@ -132,7 +134,7 @@ describe('scanResultCandidates', () => {
     const big = toolResultEvent(5, 'x'.repeat(20_000))
     const small = toolResultEvent(6, 'tiny')
     const marked = toolResultEvent(7, 'x'.repeat(20_000))
-    marked.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
+    marked.data.message.content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
     const { session } = makeSession([big, small, marked, { type: 'user/message', seq: 8, time: 1, data: {} }])
     const candidates = scanResultCandidates(session, 16_384)
     expect(candidates.map((candidate) => candidate.seq)).toEqual([5])
@@ -157,11 +159,11 @@ describe('compressSessionResults', () => {
     })
     expect(appended[1]).toMatchObject({
       type: 'tool/result',
-      opts: { surfaceOp: { op: 'replace', start: 5, end: 5 }, sourceEventSeqs: [5] },
+      opts: { surfaceOp: { op: 'replace', startSeq: 5, endSeq: 5 }, sourceEventSeqs: [5] },
     })
-    const replacementMessage = (appended[1] as { data: { message: { content: Array<{ content: Array<{ text: string }> }> } } }).data.message
-    expect(replacementMessage.content[0].content[0].text.startsWith(COMPRESSED_RESULT_PREFIX)).toBe(true)
-    expect(replacementMessage.content[0].content[0].text).toContain('ccr_abc')
+    const replacementMessage = (appended[1] as { data: { message: { content: Array<{ text: string }> } } }).data.message
+    expect(replacementMessage.content[0].text.startsWith(COMPRESSED_RESULT_PREFIX)).toBe(true)
+    expect(replacementMessage.content[0].text).toContain('ccr_abc')
     expect(outcomes).toEqual([{ seq: 5, replacementSeq: 102, tokensBefore: 1000, tokensAfter: 100 }])
   })
 
@@ -175,7 +177,7 @@ describe('compressSessionResults', () => {
 
   it('skips nodes already carrying the compression marker', async () => {
     const event = toolResultEvent(5, 'x'.repeat(20_000))
-    event.data.message.content[0].content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
+    event.data.message.content[0].text = `${COMPRESSED_RESULT_PREFIX}: 1 →1]`
     const { session, appended } = makeSession([event])
     const { client } = mockClient()
     await compressSessionResults(mockCtx, client, mockAgent, session, resolveResultCompression(undefined), new Set())

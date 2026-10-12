@@ -17,11 +17,12 @@
  * transaction keeps the original surface), and the tool returns an error.
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { JsonValue } from '@deepseek-ai/dsh-session'
-import type { SettingsNamespace, SettingsScope } from '@deepseek-ai/dsh-settings'
+/** JSON-shaped value the retrieval tool returns. */
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
+import type {} from '@deepseek-ai/dsh-settings'
 import { HeadroomCompactionEngine } from './engine.ts'
 import type { HeadroomEngineConfig } from './engine.ts'
 import { DEFAULT_HEADROOM_PORT, resolveServiceConfig, startHeadroomService } from './service.ts'
@@ -34,9 +35,32 @@ export const name = 'dsh-headroom'
 /** Services the plugin and its compaction engine read through the context. */
 export const inject: string[] = ['settings', 'tools', 'llm', 'tokenMeter', 'sessions', 'commands']
 
+/**
+ * Proxy fields the settings form edits. Each is a Volatile reference: the
+ * harness commits an edit into the running instance and announces it through
+ * `loader/volatile-update`, so no remount is needed.
+ */
+export interface HeadroomLiveConfig {
+  /** Headroom executable path. */
+  command?: Volatile<string | undefined>
+  /**
+   * Python interpreter path; when set, headroom runs as `python -m headroom`,
+   * so the user can pin the Python version that serves the proxy.
+   */
+  pythonPath?: Volatile<string | undefined>
+  /** uv executable path used when auto-installing headroom. */
+  uvCommand?: Volatile<string | undefined>
+  /** Proxy port for a spawned service. */
+  port?: Volatile<number | undefined>
+  /** Proxy base URL; empty reuses the port-derived default. */
+  baseUrl?: Volatile<string | undefined>
+  /** Auto-install headroom-ai via uv when the command is missing. */
+  autoInstall?: Volatile<boolean | undefined>
+}
+
 export interface Config {
-  /** Headroom proxy wiring; the `headroom` settings namespace overrides these. */
-  headroom?: Partial<HeadroomServiceConfig>
+  /** Headroom proxy wiring; the live `headroom` form fields override these. */
+  headroom?: Partial<Omit<HeadroomServiceConfig, keyof HeadroomLiveConfig>> & Partial<HeadroomLiveConfig>
   /** Model id reported to the proxy for token estimation; defaults to the routed model. */
   model?: string
   /** Compact at this fraction of the model's context window (default 0.8). */
@@ -51,8 +75,11 @@ export interface Config {
   maxOverflowRetries?: number
   /** Enable automatic step-boundary pressure and overflow-recovery listeners (default true). */
   auto?: boolean
-  /** Tool-result compression policy; the settings namespace overrides `enabled` and `thresholdChars`. */
-  resultCompression?: Partial<ResultCompressionConfig>
+  /** Tool-result compression policy; the live fields override `enabled` and `thresholdChars`. */
+  resultCompression?: Omit<Partial<ResultCompressionConfig>, 'enabled' | 'thresholdChars'> & {
+    enabled?: Volatile<boolean | undefined>
+    thresholdChars?: Volatile<number | undefined>
+  }
   /**
    * Compress request mode: `'ccr'` makes the proxy write CCR retrieval hashes
    * so `headroom_retrieve` can restore lossy replacements (default).
@@ -63,19 +90,19 @@ export interface Config {
 }
 
 const serviceConfigSchema = z.object({
-  baseUrl: z.string(),
-  port: z.number().step(1).min(1).max(65535),
-  command: z.string(),
-  pythonPath: z.string(),
-  uvCommand: z.string(),
-  autoInstall: z.boolean(),
+  baseUrl: z.string().volatile(),
+  port: z.number().step(1).min(1).max(65535).volatile(),
+  command: z.string().volatile(),
+  pythonPath: z.string().volatile(),
+  uvCommand: z.string().volatile(),
+  autoInstall: z.boolean().volatile(),
   installTimeoutMs: z.number().step(1).min(1_000),
   startTimeoutMs: z.number().step(1).min(1_000),
   savingsProfile: z.string(),
   kompressMustKeep: z.boolean(),
 })
 
-export const Config: z<Config> = z.object({
+export const Config = z.object({
   headroom: serviceConfigSchema,
   model: z.string(),
   thresholdRatio: z.number(),
@@ -85,8 +112,8 @@ export const Config: z<Config> = z.object({
   maxOverflowRetries: z.number().step(1).min(0),
   auto: z.boolean(),
   resultCompression: z.object({
-    enabled: z.boolean(),
-    thresholdChars: z.number().step(1).min(1),
+    enabled: z.boolean().volatile(),
+    thresholdChars: z.number().step(1).min(1).volatile(),
     minSavingsRatio: z.number(),
     maxPerStep: z.number().step(1).min(1),
   }),
@@ -94,8 +121,11 @@ export const Config: z<Config> = z.object({
   prewarm: z.boolean(),
 })
 
-/** Settings namespace shared with the browser card. */
-export const HEADROOM_SETTINGS_NS = 'headroom' as SettingsNamespace
+/**
+ * Profile row id owning this plugin's config form. Every settings read and
+ * write addresses the entry the profile mounts this package under.
+ */
+export const HEADROOM_ENTRY_ID = 'dsh-headroom'
 
 /** Fields the settings card edits; optional fields fall back to the composition layer. */
 export interface HeadroomSettings {
@@ -120,16 +150,6 @@ export interface HeadroomSettings {
   resultCompressionThresholdChars?: number
 }
 
-const headroomSettingsSchema = z.object({
-  command: z.string(),
-  pythonPath: z.string(),
-  uvCommand: z.string(),
-  port: z.number().step(1).min(1).max(65535),
-  baseUrl: z.string(),
-  autoInstall: z.boolean(),
-  resultCompressionEnabled: z.boolean(),
-  resultCompressionThresholdChars: z.number().step(1).min(1),
-})
 
 /** Every key BasicCompactionEngine's config validation accepts. */
 const BASIC_CONFIG_KEYS = [
@@ -156,29 +176,19 @@ function engineConfig(config: Config): HeadroomEngineConfig {
 }
 
 export function apply(ctx: Context, config: Config): void {  ctx.provide('headroomClient', undefined)
-  const scope = ctx.settings.register(HEADROOM_SETTINGS_NS, headroomSettingsSchema, {
-    base: {
-      command: config.headroom?.command ?? '',
-      pythonPath: config.headroom?.pythonPath ?? '',
-      uvCommand: config.headroom?.uvCommand ?? '',
-      port: config.headroom?.port ?? DEFAULT_HEADROOM_PORT,
-      baseUrl: config.headroom?.baseUrl ?? '',
-      autoInstall: config.headroom?.autoInstall ?? true,
-    },
-    applies: 'live',
-  })
+  const live = (): HeadroomSettings => liveSettings(config)
 
-  installProxyLifecycle(ctx, scope, config)
+  installProxyLifecycle(ctx, live, config)
 
   // Tool-result compression runs before the historical compaction pass, so
   // the surface the compaction prices is already slimmed.
-  installResultCompression(ctx, () => liveResultConfig(scope, config))
+  installResultCompression(ctx, () => liveResultConfig(live(), config))
 
   installEngine(ctx, config)
 
   installTakeoverRollback(ctx)
 
-  installHeadroomCommand(ctx, scope, HEADROOM_SETTINGS_NS)
+  installHeadroomCommand(ctx, live, () => ownEntryId(ctx))
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'headroom_retrieve',
@@ -204,13 +214,52 @@ export function apply(ctx: Context, config: Config): void {  ctx.provide('headro
 }
 
 /**
+ * Read the live settings from the plugin's Config references. A field the
+ * profile never sets resolves to the schema layer, so a reader answers
+ * `undefined` and each consumer applies its own composition default.
+ * @param config - the plugin's Config.
+ * @returns the current settings.
+ */
+function liveSettings(config: Config): HeadroomSettings {
+  return {
+    command: config.headroom?.command?.get(),
+    pythonPath: config.headroom?.pythonPath?.get(),
+    uvCommand: config.headroom?.uvCommand?.get(),
+    port: config.headroom?.port?.get(),
+    baseUrl: config.headroom?.baseUrl?.get(),
+    autoInstall: config.headroom?.autoInstall?.get(),
+    resultCompressionEnabled: config.resultCompression?.enabled?.get(),
+    resultCompressionThresholdChars: config.resultCompression?.thresholdChars?.get(),
+  }
+}
+
+/**
+ * The profile row id owning this plugin's config form. Resolved by fiber
+ * identity so the form keeps working under any row id a profile chooses.
+ * @param ctx - the plugin's own context.
+ * @returns the row id, or the conventional id when the row is not addressable.
+ */
+/** Config-editor surface this plugin needs; the service is not typed on Context. */
+export interface ConfigEditorLike {
+  entries(): Array<{ fiber?: unknown; options: { id: string } }>
+}
+
+export function ownEntryId(ctx: Context): string {
+  const editor = (ctx as unknown as { configEditor?: ConfigEditorLike }).configEditor
+  const own = editor?.entries().find(entry => entry.fiber === ctx.fiber)
+  return own?.options.id ?? HEADROOM_ENTRY_ID
+}
+
+/**
  * Result-compression policy resolved at a step boundary: settings values
  * override the composition layer, which itself defaults over the baked-in
  * policy defaults.
  */
-function liveResultConfig(scope: SettingsScope<HeadroomSettings>, config: Config): ResultCompressionConfig {
-  const base = resolveResultCompression(config.resultCompression)
-  const settings = scope.get()
+function liveResultConfig(settings: HeadroomSettings, config: Config): ResultCompressionConfig {
+  const base = resolveResultCompression({
+    minSavingsRatio: config.resultCompression?.minSavingsRatio,
+    maxPerStep: config.resultCompression?.maxPerStep,
+  })
   return {
     ...base,
     enabled: settings.resultCompressionEnabled ?? base.enabled,
@@ -226,7 +275,7 @@ function liveResultConfig(scope: SettingsScope<HeadroomSettings>, config: Config
  */
 function installProxyLifecycle(
   ctx: Context,
-  scope: SettingsScope<HeadroomSettings>,
+  live: () => HeadroomSettings,
   config: Config,
 ): void {
   ctx.effect(() => {
@@ -238,7 +287,7 @@ function installProxyLifecycle(
     const restart = (): void => {
       queue = queue.then(async () => {
         const id = ++generation
-        const settings = scope.get()
+        const settings = live()
         const launchKey = JSON.stringify({
           command: settings.command ?? null,
           pythonPath: settings.pythonPath ?? null,
@@ -256,7 +305,10 @@ function installProxyLifecycle(
         }
         lastLaunchKey = launchKey
         const service = resolveServiceConfig({
-          ...config.headroom,
+          installTimeoutMs: config.headroom?.installTimeoutMs,
+          startTimeoutMs: config.headroom?.startTimeoutMs,
+          savingsProfile: config.headroom?.savingsProfile,
+          kompressMustKeep: config.headroom?.kompressMustKeep,
           command: settings.command || undefined,
           pythonPath: settings.pythonPath || undefined,
           uvCommand: settings.uvCommand || undefined,
@@ -293,7 +345,7 @@ function installProxyLifecycle(
     }
 
     void restart()
-    const stopWatch = scope.watch(() => restart())
+    const stopWatch = onVolatileUpdate(ctx, () => restart())
     return () => {
       generation += 1
       stopWatch()
@@ -301,6 +353,18 @@ function installProxyLifecycle(
       ctx.reflect.set('headroomClient', undefined)
     }
   }, 'dsh-headroom: proxy lifecycle')
+}
+
+/**
+ * Subscribe to the loader's instance-local volatile-config notification, which
+ * fires after an edit commits into this plugin's running Config references.
+ * @param ctx - the plugin's context.
+ * @param listener - called once per committed volatile change.
+ * @returns the disposer removing the listener.
+ */
+function onVolatileUpdate(ctx: Context, listener: () => void): () => void {
+  const on = ctx.on as unknown as (event: string, handler: () => void) => () => void
+  return on.call(ctx, 'loader/volatile-update', listener)
 }
 
 /** BasicCompactionEngine's default retention ratio, mirrored for load-time validation. */

@@ -11,7 +11,7 @@ import css from './HeadroomCard.module.css'
 
 /** Props the renderer binds for the Headroom settings card. */
 export type HeadroomCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'plugins.bundle.config'>
   & PropsLocale<'dsh-headroom'>
   & InjectFace<HeadroomCardFace>
 

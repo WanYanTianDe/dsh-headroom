@@ -19,9 +19,6 @@ export interface OpenAiWireMessage {
 /** Convert a DSH summarization input to the OpenAI message shape. */
 export function toOpenAiMessages(input: SummarizationInput): OpenAiWireMessage[] {
   const messages: OpenAiWireMessage[] = []
-  if (input.system !== undefined && input.system.length > 0) {
-    messages.push({ role: 'system', content: input.system })
-  }
   for (const message of input.messages) {
     messages.push(...messageToOpenAi(message))
   }
@@ -29,15 +26,8 @@ export function toOpenAiMessages(input: SummarizationInput): OpenAiWireMessage[]
 }
 
 function messageToOpenAi(message: Message): OpenAiWireMessage[] {
-  const toolResults = message.content.filter(
-    (block): block is Extract<ContentBlock, { type: 'tool-result' }> => block.type === 'tool-result',
-  )
-  if (toolResults.length > 0) {
-    return toolResults.map((block) => ({
-      role: 'tool',
-      tool_call_id: block.toolCallId,
-      content: blocksToText(block.content),
-    }))
+  if (message.role === 'tool') {
+    return [{ role: 'tool', tool_call_id: message.toolCallId, content: blocksToText(message.content) }]
   }
   if (message.role === 'assistant') {
     const toolCalls = message.content.filter(
@@ -70,10 +60,10 @@ function blockToText(block: ContentBlock): string {
       return ''
     case 'image':
       return '[image]'
+    case 'file':
+      return '[file]'
     case 'tool-call':
       return JSON.stringify({ id: block.id, name: block.name, arguments: block.arguments })
-    case 'tool-result':
-      return blocksToText(block.content)
     default:
       return JSON.stringify(block)
   }

@@ -1,14 +1,13 @@
 /**
  * `/headroom` human command: view or change the plugin's settings without the
- * browser card. The card depends on the harness settings-exposure allowlist,
- * which external plugins cannot extend; the command writes the same settings
- * namespace host-side through the settings service, so it works on every
- * harness version.
+ * browser card. The command reads the plugin's live Config references and
+ * writes the same fields host-side through the settings service, so it works
+ * on every harness version.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import type { HeadroomSettings } from './index.ts'
 
 const USAGE = 'Usage: /headroom (no args) | /headroom set <key> <value> | /headroom unset <key>'
@@ -23,6 +22,18 @@ const KEY_KINDS: Record<string, 'number' | 'boolean' | 'string'> = {
   autoInstall: 'boolean',
   resultCompressionEnabled: 'boolean',
   resultCompressionThresholdChars: 'number',
+}
+
+/** Settings keys mapped to their path inside the plugin's own Config. */
+const KEY_PATHS: Record<string, readonly string[]> = {
+  port: ['headroom', 'port'],
+  baseUrl: ['headroom', 'baseUrl'],
+  command: ['headroom', 'command'],
+  pythonPath: ['headroom', 'pythonPath'],
+  uvCommand: ['headroom', 'uvCommand'],
+  autoInstall: ['headroom', 'autoInstall'],
+  resultCompressionEnabled: ['resultCompression', 'enabled'],
+  resultCompressionThresholdChars: ['resultCompression', 'thresholdChars'],
 }
 
 /** One parsed command request. */
@@ -74,32 +85,36 @@ export function renderSettings(settings: HeadroomSettings): string {
   return JSON.stringify(settings, null, 2)
 }
 
-/** The settings-scope surface the command writes through. */
-export interface HeadroomCommandScope {
-  get(): HeadroomSettings
-  update(patch: object): Promise<void>
-}
 
-/** Execute one parsed command against the settings service and scope. */
+/**
+ * Execute one parsed command against the live settings and the config form.
+ * @param ctx - context carrying the settings service.
+ * @param live - reader of the plugin's current settings.
+ * @param ownEntry - resolves the profile row id owning the config form.
+ * @param command - the parsed request.
+ * @returns the command's result.
+ */
 export async function executeHeadroomCommand(
   ctx: Context,
-  scope: HeadroomCommandScope,
-  ns: SettingsNamespace,
+  live: () => HeadroomSettings,
+  ownEntry: () => string,
   command: HeadroomCommand,
 ): Promise<CommandResult> {
   try {
     if (command.kind === 'show') {
-      return { kind: 'success', text: `Current settings:\n${renderSettings(scope.get())}` }
+      return { kind: 'success', text: `Current settings:\n${renderSettings(live())}` }
     }
-    if (command.kind === 'unset') {
-      const descriptor = ctx.settings.describe().find((entry) => entry.ns === ns)
-      const next: Record<string, unknown> = { ...(descriptor?.user ?? {}) }
-      delete next[command.key]
-      await ctx.settings.replace(ns, next)
-      return { kind: 'success', text: `Cleared ${command.key}; the composition default applies.` }
+    const path = KEY_PATHS[command.key]
+    if (path === undefined) return { kind: 'error', text: USAGE }
+    await ctx.settings.mutate(ownEntry(), command.kind === 'unset'
+      ? [{ op: 'unset', path }]
+      : [{ op: 'set', path, value: command.value }])
+    return {
+      kind: 'success',
+      text: command.kind === 'unset'
+        ? `Cleared ${command.key}; the composition default applies.`
+        : `Set ${command.key} = ${JSON.stringify(command.value)}.`,
     }
-    await scope.update({ [command.key]: command.value })
-    return { kind: 'success', text: `Set ${command.key} = ${JSON.stringify(command.value)}.` }
   } catch (error: unknown) {
     return { kind: 'error', text: `Failed to update settings: ${error instanceof Error ? error.message : String(error)}` }
   }
@@ -108,13 +123,13 @@ export async function executeHeadroomCommand(
 /**
  * Register the `/headroom` command.
  * @param ctx - context carrying the command registry and settings service.
- * @param scope - the plugin's settings scope, written host-side.
- * @param ns - the plugin's settings namespace.
+ * @param live - reader of the plugin's current settings.
+ * @param ownEntry - resolves the profile row id owning the config form.
  */
 export function installHeadroomCommand(
   ctx: Context,
-  scope: HeadroomCommandScope,
-  ns: SettingsNamespace,
+  live: () => HeadroomSettings,
+  ownEntry: () => string,
 ): void {
   ctx.effect(() => ctx.commands.register({
     name: 'headroom',
@@ -124,7 +139,7 @@ export function installHeadroomCommand(
       if (command.kind === 'show' && invocation.rawInput.trim().length > 0) {
         return Promise.resolve({ kind: 'error', text: USAGE })
       }
-      return executeHeadroomCommand(ctx, scope, ns, command)
+      return executeHeadroomCommand(ctx, live, ownEntry, command)
     },
   }), 'dsh-headroom: command')
 }

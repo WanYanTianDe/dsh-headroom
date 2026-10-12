@@ -1,0 +1,8 @@
+# dsh-headroom bundle layer: one package mounting both halves. The host side
+# owns the proxy lifecycle, the compaction backend, the headroom_retrieve tool
+# and the /headroom command; the browser side registers this bundle's settings
+# card on the bundle's own page in the Plugins manager.
+
+- insert:
+    - id: dsh-headroom
+      name: '@wanyantiande/dsh-headroom'

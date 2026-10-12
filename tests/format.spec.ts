@@ -13,10 +13,12 @@ function userMessage(text: string): Message {
 
 function toolResultMessage(callId: string, text: string): Message {
   return {
-    role: 'user',
+    role: 'tool',
     id: `t-${callId}`,
-    content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text }] }],
-    source: { kind: 'tool' },
+    toolCallId: callId,
+    isError: false,
+    content: [{ type: 'text', text }],
+    source: { kind: 'tool', callId },
   } as Message
 }
 
@@ -29,30 +31,34 @@ function assistantToolCallMessage(callId: string, name: string): Message {
   } as Message
 }
 
-function input(messages: Message[], system = 'sys'): SummarizationInput {
-  return { system, messages }
+function systemMessage(text: string): Message {
+  return { role: 'system', id: 's1', content: [{ type: 'text', text }], source: { kind: 'system-prompt' } } as Message
+}
+
+function input(messages: Message[]): SummarizationInput {
+  return { messages }
 }
 
 describe('toOpenAiMessages', () => {
-  it('emits system first, then converted messages', () => {
-    const out = toOpenAiMessages(input([userMessage('hi')], 'SYSTEM'))
+  it('keeps the system head the input carries, in order', () => {
+    const out = toOpenAiMessages(input([systemMessage('SYSTEM'), userMessage('hi')]))
     expect(out[0]).toEqual({ role: 'system', content: 'SYSTEM' })
     expect(out[1]).toEqual({ role: 'user', content: 'hi' })
   })
 
-  it('skips a missing system', () => {
-    const out = toOpenAiMessages(input([userMessage('hi')], ''))
+  it('converts only the messages the input carries', () => {
+    const out = toOpenAiMessages(input([userMessage('hi')]))
     expect(out).toHaveLength(1)
     expect(out[0]!.role).toBe('user')
   })
 
   it('splits tool-result blocks into role=tool messages with call ids', () => {
-    const out = toOpenAiMessages(input([toolResultMessage('c1', '{"a":1}')], ''))
+    const out = toOpenAiMessages(input([toolResultMessage('c1', '{"a":1}')]))
     expect(out).toEqual([{ role: 'tool', tool_call_id: 'c1', content: '{"a":1}' }])
   })
 
   it('converts assistant tool calls to tool_calls', () => {
-    const out = toOpenAiMessages(input([assistantToolCallMessage('c1', 'ls')], ''))
+    const out = toOpenAiMessages(input([assistantToolCallMessage('c1', 'ls')]))
     expect(out[0]!.role).toBe('assistant')
     expect(out[0]!.tool_calls).toEqual([{
       id: 'c1',
@@ -68,7 +74,7 @@ describe('toOpenAiMessages', () => {
       content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }],
       source: { kind: 'user' },
     } as Message
-    const out = toOpenAiMessages(input([msg], ''))
+    const out = toOpenAiMessages(input([msg]))
     expect(out[0]!.content).toBe('a\nb')
   })
 })

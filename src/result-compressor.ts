@@ -17,7 +17,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-compaction'
 // Type-only: the `ctx.tokenMeter` Context merge for the shadow pricing.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import type { Session, SessionEvent, ToolResultMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionSeq, ToolResultMessage } from '@deepseek-ai/dsh-session'
 import type { HeadroomClient, HeadroomCompressResponse } from './client.ts'
 import { routedModel } from './engine.ts'
 
@@ -73,7 +73,7 @@ export function isCompressedResult(blocks: readonly ContentBlock[]): boolean {
 
 /** One candidate tool-result surface node for compression. */
 export interface ResultCandidate {
-  readonly seq: number
+  readonly seq: SessionSeq
   readonly event: SessionEvent<'tool/result'>
 }
 
@@ -87,13 +87,12 @@ export interface ResultCandidate {
  */
 export function scanResultCandidates(session: Session, thresholdChars: number): ResultCandidate[] {
   const candidates: ResultCandidate[] = []
-  for (const seq of [...session.surface.nodes]) {
-    const event = session.events[seq]
+  for (const seq of session.surface.nodes) {
+    const event = session.eventAt(seq)
     if (event?.type !== 'tool/result') continue
-    const result = event.data.message.content[0]
-    if (result === undefined) continue
-    if (isCompressedResult(result.content)) continue
-    if (measureText(result.content) < thresholdChars) continue
+    const message = event.data.message
+    if (isCompressedResult(message.content)) continue
+    if (measureText(message.content) < thresholdChars) continue
     candidates.push({ seq, event })
   }
   return candidates
@@ -138,7 +137,7 @@ export function renderCompressedResult(
 export interface ResultCompressOutcome {
   readonly seq: number
   /** The seq of the appended replacement `tool/result` event. */
-  readonly replacementSeq: number
+  readonly replacementSeq: SessionSeq
   readonly tokensBefore: number
   readonly tokensAfter: number
 }
@@ -151,11 +150,6 @@ function compressedText(response: HeadroomCompressResponse): string | undefined 
   return typeof content === 'string' && content.length > 0 ? content : undefined
 }
 
-/** The tool-result message's single result block, when present. */
-function resultBlock(message: ToolResultMessage): Extract<ContentBlock, { type: 'tool-result' }> | undefined {
-  const block = message.content[0]
-  return block?.type === 'tool-result' ? block : undefined
-}
 
 /**
  * Compress the over-budget tool results of one session through the proxy,
@@ -180,7 +174,7 @@ export async function compressSessionResults(
   agent: Agent,
   session: Session,
   config: ResultCompressionConfig,
-  attempted: Set<number>,
+  attempted: Set<SessionSeq>,
   signal?: AbortSignal,
 ): Promise<ResultCompressOutcome[]> {
   const candidates = scanResultCandidates(session, config.thresholdChars)
@@ -191,9 +185,7 @@ export async function compressSessionResults(
     attempted.add(seq)
     signal?.throwIfAborted()
     const message = event.data.message
-    const result = resultBlock(message)
-    if (result === undefined) continue
-    const text = result.content
+    const text = message.content
       .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
       .map((block) => block.text)
       .join('\n')
@@ -203,7 +195,7 @@ export async function compressSessionResults(
     // the honest estimate, the harness default stands in before any request.
     const model = routedModel(agent) ?? 'deepseek-chat'
     const response = await client.compress(
-      [{ role: 'tool', tool_call_id: result.toolCallId, content: text }],
+      [{ role: 'tool', tool_call_id: message.toolCallId, content: text }],
       model,
     )
     signal?.throwIfAborted()
@@ -219,7 +211,7 @@ export async function compressSessionResults(
     )
     const replacement = freezeMessage<ToolResultMessage>({
       ...message,
-      content: [{ ...result, content: [{ type: 'text', text: replaced }] }],
+      content: [{ type: 'text', text: replaced }],
     })
     // Shadow-price protocol: the metering event and its replacement are
     // appended synchronously adjacent, so pure consumers subtract the
@@ -230,7 +222,7 @@ export async function compressSessionResults(
       shadowedTokenCount: ctx.tokenMeter.estimateMessage(message),
     })
     const replacementEvent = session.append('tool/result', { ...event.data, message: replacement }, {
-      surfaceOp: { op: 'replace', start: seq, end: seq },
+      surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq },
       sourceEventSeqs: [seq],
     })
     outcomes.push({
@@ -258,7 +250,7 @@ export function installResultCompression(
 ): void {
   // Tried-but-unprofitable tool results per session, so later passes advance
   // past them instead of re-attempting the same low-yield candidates.
-  const attempted = new WeakMap<Session, Set<number>>()
+  const attempted = new WeakMap<Session, Set<SessionSeq>>()
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const config = resolveConfig()
     const client = ctx.headroomClient
@@ -266,7 +258,7 @@ export function installResultCompression(
       try {
         let tried = attempted.get(agent.session)
         if (tried === undefined) {
-          tried = new Set<number>()
+          tried = new Set<SessionSeq>()
           attempted.set(agent.session, tried)
         }
         const outcomes = await compressSessionResults(ctx, client, agent, agent.session, config, tried, signal)

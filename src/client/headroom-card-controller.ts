@@ -1,15 +1,82 @@
 /**
  * Form controller for the Headroom settings card: stages field drafts and
- * writes them through the settings scope only on save. Mirrors the harness's
+ * writes them through the plugin's own config form only on save. Mirrors the harness's
  * CardForm pattern (draft staging, presence-marked overrides, host read-back)
  * without importing the internal ui-settings-plugins form machinery.
  */
 
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
-/** Settings namespace shared with the host plugin. */
-export const HEADROOM_NS = 'headroom'
+/**
+ * Profile row id owning this plugin's config form. Spelled here rather than
+ * imported: a client package must not depend on a Host package.
+ */
+export const HEADROOM_ENTRY_ID = 'dsh-headroom'
+
+/** The live field behind each control, as a path inside the plugin's Config. */
+const FIELD_PATHS: Record<HeadroomTextField | 'autoInstall' | 'resultCompressionEnabled', readonly string[]> = {
+  command: ['headroom', 'command'],
+  pythonPath: ['headroom', 'pythonPath'],
+  uvCommand: ['headroom', 'uvCommand'],
+  port: ['headroom', 'port'],
+  baseUrl: ['headroom', 'baseUrl'],
+  autoInstall: ['headroom', 'autoInstall'],
+  resultCompressionEnabled: ['resultCompression', 'enabled'],
+  thresholdChars: ['resultCompression', 'thresholdChars'],
+}
+
+/** JSON-shaped value a field write carries. */
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
+
+/** The flat settings view the card edits, backed by the entry's config form. */
+export interface HeadroomFormScope {
+  getSnapshot(): {
+    status: 'loading' | 'ready' | 'unavailable'
+    value: HeadroomSettings | undefined
+    writable: boolean
+  }
+  subscribe(listener: () => void): () => void
+  set(field: HeadroomTextField | 'autoInstall' | 'resultCompressionEnabled', value: unknown): Promise<boolean>
+  unset(field: HeadroomTextField | 'autoInstall' | 'resultCompressionEnabled'): Promise<boolean>
+}
+
+/** Project the entry's Config onto the flat settings the card renders. */
+function projectSettings(value: unknown): HeadroomSettings | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const root = value as { headroom?: Record<string, unknown>; resultCompression?: Record<string, unknown> }
+  const headroom = root.headroom ?? {}
+  const compression = root.resultCompression ?? {}
+  return {
+    command: textValue(headroom.command),
+    pythonPath: textValue(headroom.pythonPath),
+    uvCommand: textValue(headroom.uvCommand),
+    port: typeof headroom.port === 'number' ? headroom.port : undefined,
+    baseUrl: textValue(headroom.baseUrl),
+    autoInstall: typeof headroom.autoInstall === 'boolean' ? headroom.autoInstall : undefined,
+    resultCompressionEnabled: typeof compression.enabled === 'boolean' ? compression.enabled : undefined,
+    resultCompressionThresholdChars: typeof compression.thresholdChars === 'number'
+      ? compression.thresholdChars
+      : undefined,
+  }
+}
+
+/**
+ * Bind the card's flat settings view to the plugin's own config form.
+ * @param form - the shared form of the entry this plugin is mounted as.
+ * @returns the view the card controller edits through.
+ */
+export function headroomFormScope(form: ConfigForm<Record<string, unknown>>): HeadroomFormScope {
+  return {
+    getSnapshot: () => {
+      const snapshot = form.getSnapshot()
+      return { status: snapshot.status, value: projectSettings(snapshot.value), writable: snapshot.writable }
+    },
+    subscribe: listener => form.subscribe(listener),
+    set: (field, value) => form.mutate([{ op: 'set', path: [...FIELD_PATHS[field]], value: value as JsonValue }]),
+    unset: field => form.mutate([{ op: 'unset', path: [...FIELD_PATHS[field]] }]),
+  }
+}
 
 /** The section fields the card edits; mirrored from the host declaration. */
 export interface HeadroomSettings {
@@ -78,13 +145,13 @@ function numberText(value: unknown): string {
 }
 
 export class HeadroomCardController {
-  private readonly staged = new Map<string, string>()
+  private readonly staged = new Map<HeadroomTextField, string>()
   private saving = false
   private failed = false
   private readonly store: SnapshotStore<HeadroomCardState>
   private readonly stopWatch: () => void
 
-  constructor(private readonly scope: SettingsScope<HeadroomSettings>) {
+  constructor(private readonly scope: HeadroomFormScope) {
     this.store = createSnapshotStore(this.projection())
     this.stopWatch = scope.subscribe(() => { this.publish() })
   }
@@ -116,7 +183,7 @@ export class HeadroomCardController {
     }
   }
 
-  private draft(field: string, stored: string): string {
+  private draft(field: HeadroomTextField, stored: string): string {
     return this.staged.get(field) ?? stored
   }
 

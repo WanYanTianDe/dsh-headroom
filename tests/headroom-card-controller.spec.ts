@@ -1,39 +1,36 @@
 /**
  * headroom-card-controller 状态机测试:staged 草稿、save 提交、失败保留。
- * 使用最小 stub SettingsScope 与 runtime-client mock(vitest alias)。
+ * 使用最小 stub HeadroomFormScope(内存值 + set/unset + 订阅)。
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import { HeadroomCardController } from '../src/client/headroom-card-controller.ts'
 import type { HeadroomSettings } from '../src/client/headroom-card-controller.ts'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { HeadroomFormScope } from '../src/client/headroom-card-controller.ts'
 
-/** 最小 SettingsScope stub:内存值 + set/unset + 订阅。 */
-function stubScope(initial: HeadroomSettings = {}): SettingsScope<HeadroomSettings> {
+/** 最小 HeadroomFormScope stub:内存值 + set/unset + 订阅。 */
+function stubScope(initial: HeadroomSettings = {}): HeadroomFormScope {
   let value: HeadroomSettings | undefined = { ...initial }
   const listeners = new Set<() => void>()
   return {
-    getSnapshot: () => ({
-      status: 'ready',
-      value,
-      base: null,
-      user: value,
-      revision: 1,
-      writable: true,
-      mode: 'host',
-    }),
+    getSnapshot: () => ({ status: 'ready', value, writable: true }),
     subscribe: (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
     set: async (field, next) => {
       value = { ...value, [field]: next }
+      for (const listener of listeners) listener()
+      return true
     },
     unset: async (field) => {
-      value = { ...value }
-      delete (value as Record<string, unknown>)[field]
+      const next: Record<string, unknown> = { ...value }
+      delete next[field]
+      value = next as HeadroomSettings
+      for (const listener of listeners) listener()
+      return true
     },
-  } as SettingsScope<HeadroomSettings>
+  } as HeadroomFormScope
 }
 
 function snapshot(controller: HeadroomCardController): ReturnType<HeadroomCardController['inject']> {

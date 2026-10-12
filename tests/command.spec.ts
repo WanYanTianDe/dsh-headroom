@@ -1,36 +1,24 @@
 /**
  * `/headroom` command semantics: argument parsing (show / set / unset), value
- * coercion by key kind, and host-side settings writes that bypass the browser
- * card's harness exposure allowlist.
+ * coercion by key kind, and host-side writes of the plugin's own config fields.
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import type { HeadroomCommandScope } from '../src/command.ts'
+import type { HeadroomSettings } from '../src/index.ts'
 import { executeHeadroomCommand, parseHeadroomCommand } from '../src/command.ts'
 
-const NS = 'headroom' as SettingsNamespace
+const ENTRY = 'dsh-headroom'
 
-function makeScope(initial: Record<string, unknown> = {}) {
-  const value: Record<string, unknown> = { ...initial }
-  return {
-    get: () => ({ ...value }),
-    update: vi.fn(async (patch: Record<string, unknown>) => { Object.assign(value, patch) }),
-  } as unknown as HeadroomCommandScope
+/** Live-settings reader over a mutable record. */
+function makeLive(initial: HeadroomSettings = {}) {
+  const value: HeadroomSettings = { ...initial }
+  return { read: () => ({ ...value }), value }
 }
 
-function makeCtx(userLayer: Record<string, unknown> = {}) {
-  const user: Record<string, unknown> = { ...userLayer }
-  return {
-    settings: {
-      describe: () => [{ ns: NS, user }],
-      replace: vi.fn(async (_ns: unknown, section: Record<string, unknown>) => {
-        for (const key of Object.keys(user)) delete user[key]
-        Object.assign(user, section)
-      }),
-    },
-  } as unknown as Context
+/** Context double carrying only the settings service the command writes through. */
+function makeCtx() {
+  return { settings: { mutate: vi.fn(async () => {}) } } as unknown as Context
 }
 
 describe('parseHeadroomCommand', () => {
@@ -66,32 +54,32 @@ describe('parseHeadroomCommand', () => {
 
 describe('executeHeadroomCommand', () => {
   it('shows the current settings', async () => {
-    const scope = makeScope({ port: 8787, autoInstall: true })
-    const result = await executeHeadroomCommand(makeCtx(), scope, NS, { kind: 'show' })
+    const live = makeLive({ port: 8787, autoInstall: true })
+    const result = await executeHeadroomCommand(makeCtx(), live.read, () => ENTRY, { kind: 'show' })
     expect(result.kind).toBe('success')
     expect((result as { text: string }).text).toContain('"port": 8787')
   })
 
-  it('writes a typed value host-side', async () => {
-    const scope = makeScope()
-    const result = await executeHeadroomCommand(makeCtx(), scope, NS, { kind: 'set', key: 'port', value: 9000 })
+  it('writes a typed value into the entry config', async () => {
+    const ctx = makeCtx()
+    const result = await executeHeadroomCommand(ctx, makeLive().read, () => ENTRY, { kind: 'set', key: 'port', value: 9000 })
     expect(result.kind).toBe('success')
-    expect(scope.update).toHaveBeenCalledWith({ port: 9000 })
+    expect(ctx.settings.mutate).toHaveBeenCalledWith(ENTRY, [{ op: 'set', path: ['headroom', 'port'], value: 9000 }])
   })
 
-  it('clears a key from the user layer through replace', async () => {
-    const scope = makeScope()
-    const ctx = makeCtx({ port: 9000, autoInstall: true })
-    const result = await executeHeadroomCommand(ctx, scope, NS, { kind: 'unset', key: 'port' })
+  it('clears a field so the composition layer applies again', async () => {
+    const ctx = makeCtx()
+    const result = await executeHeadroomCommand(ctx, makeLive({ port: 9000 }).read, () => ENTRY, { kind: 'unset', key: 'port' })
     expect(result.kind).toBe('success')
-    const replace = ctx.settings.replace as ReturnType<typeof vi.fn>
-    expect(replace).toHaveBeenCalledWith(NS, { autoInstall: true })
+    expect(ctx.settings.mutate).toHaveBeenCalledWith(ENTRY, [{ op: 'unset', path: ['headroom', 'port'] }])
   })
 
-  it('reports scope failures as an error result', async () => {
-    const scope = makeScope()
-    scope.update = vi.fn(async () => { throw new Error('schema rejected') })
-    const result = await executeHeadroomCommand(makeCtx(), scope, NS, { kind: 'set', key: 'port', value: 9000 })
+  it('reports host refusals as an error result', async () => {
+    const ctx = makeCtx()
+    ;(ctx.settings.mutate as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      throw new Error('schema rejected')
+    })
+    const result = await executeHeadroomCommand(ctx, makeLive().read, () => ENTRY, { kind: 'set', key: 'port', value: 9000 })
     expect(result.kind).toBe('error')
     expect((result as { text: string }).text).toContain('schema rejected')
   })

@@ -1,27 +1,18 @@
 /**
  * Client-side slot declarations for the dsh-headroom card.
  *
- * `settings.plugin.item` is declared by the harness's ui-settings-plugins
- * package; this declaration merges the same shape so the browser half can
- * register a card without a build-time dependency on that package.
+ * `plugins.bundle.config` is declared by the harness's plugin manager page;
+ * this declaration merges the same shape so the browser half can register a
+ * card on the page of the bundle it configures, without a build-time
+ * dependency on that package.
  */
 
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { HeadroomKey } from './locales.ts'
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    /** Settings namespace binder, provided by the harness's ui-settings package. */
-    settingsScope: {
-      bind<T>(spec: SettingsScopeSpec<T>): SettingsScope<T>
-    }
-  }
-}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
-    /** One plugin card inside the settings plugin section. */
-    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: { children?: never } }
+    /** One bundle's own configuration, rendered on the bundle's page. */
+    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: { children?: never } }
   }
 
   interface LocaleNamespaceMap {
@@ -29,4 +20,3 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'dsh-headroom': HeadroomKey
   }
 }
-
