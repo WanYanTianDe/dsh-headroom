@@ -34,6 +34,11 @@ interface SlotRegistryLike {
     locale: string
     inject: () => HeadroomCardFace
   }, component: unknown): () => void
+  /**
+   * Run the contribution factory once the named slot is declared; registering
+   * before that point is refused, so every card waits for its seat.
+   */
+  inject(name: string, register: () => () => void): () => void
 }
 
 /** Required services (cordis fiber inject). */
@@ -52,7 +57,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => () => controller.dispose(), 'dsh-headroom: card controller lifetime')
 
   const slots = (ctx as unknown as { slots: SlotRegistryLike }).slots
-  ctx.effect(() => slots.register(
+  ctx.effect(() => slots.inject('plugins.bundle.config', () => slots.register(
     {
       name: 'plugins.bundle.config',
       // The seat is keyed by the bundle's package name and rendered on that
@@ -62,5 +67,5 @@ export function apply(ctx: ClientContext): void {
       inject: () => controller.inject(),
     },
     HeadroomCard,
-  ), 'dsh-headroom: card')
+  )), 'dsh-headroom: card')
 }

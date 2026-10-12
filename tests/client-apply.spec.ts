@@ -43,9 +43,15 @@ describe('client apply', () => {
     const registrations: Registration[] = []
     const localeNamespaces: string[] = []
     const requestedEntries: string[] = []
+    const injectedSeats: string[] = []
 
     const ctx = {
       slots: {
+        // 座位可能晚于本插件声明,官方页面统一先 inject 再 register。
+        inject: (name: string, register: () => () => void) => {
+          injectedSeats.push(name)
+          return register()
+        },
         register: (options: Record<string, unknown>, component: unknown) => {
           registrations.push({ options, component })
           return () => {}
@@ -71,6 +77,7 @@ describe('client apply', () => {
 
     expect(localeNamespaces).toEqual(['dsh-headroom'])
     expect(requestedEntries).toEqual([HEADROOM_ENTRY_ID])
+    expect(injectedSeats).toEqual(['plugins.bundle.config'])
     expect(registrations).toHaveLength(1)
     expect(registrations[0]?.options.name).toBe('plugins.bundle.config')
     // keyed 槽位:key 是 bundle 的包名,Plugins 页按它找到该 bundle 的页面。
